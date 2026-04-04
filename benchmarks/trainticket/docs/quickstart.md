@@ -8,9 +8,7 @@
 
 Train‑Ticket 0.0.4 的业务清单在：`benchmarks/trainticket/train-ticket/deployment/quickstart-k8s-deployment/`。
 
-Prometheus 清单在：`benchmarks/trainticket/train-ticket/deployment/prometheus-deployment/`。
-
-说明：本文仍然保留 `kind + Istio + Prometheus + Train‑Ticket` 的实验流程，但业务部署部分已按当前仓库中的 `0.0.4` 真实目录修正。
+本文的业务部署以这套 `0.0.4` 清单和对应预构建镜像为准。
 
 ---
 
@@ -31,25 +29,13 @@ mvn -version
 
 #### 1.1 一个很重要的版本说明
 
-当前这套 `kind + quickstart-k8s-deployment` 清单默认拉起的是预构建镜像，例如 `docker.io/codewisdom/ts-basic-service:0.0.4`、`docker.io/codewisdom/ts-travel-service:0.0.4`。
+本次部署以 `quickstart-k8s-deployment` 和对应的 `0.0.4` 预构建镜像作为可运行基线，不混入仓库后续版本中的新服务、新接口或新配置。
 
-这些正在运行的 `0.0.4` 镜像，与仓库当前 Java 源码并不是完全同一条线，至少有两类差异已经确认：
+已确认的一个例外是：`docker.io/codewisdom/ts-ui-dashboard:0.0.4` 不能视为严格对应 `tag 0.0.4` 源码。该镜像内的 `nginx.conf` 额外引用了 `ts-avatar-service`，而 `0.0.4` 清单并未部署该服务，直接使用会导致 `ts-ui-dashboard` `CrashLoopBackOff`。`m.daocloud.io/docker.io/codewisdom/ts-ui-dashboard:0.0.4` 只是镜像站，其内容与 Docker Hub 上这份镜像一致。
 
-- 运行镜像里的 `ts-travel-service` 使用 `MongoDB`（例如 `ts-travel-mongo`），并与 `quickstart-k8s-deployment` 中的数据库清单保持一致
-- 本文以 `0.0.4` 预构建镜像和 `quickstart-k8s-deployment` 清单为准，不把仓库后续版本中的新接口、新配置和新服务混入这次部署
+因此，本文统一要求复现者基于仓库中的 `ts-ui-dashboard/` 目录本地构建 `localhost/ts-ui-dashboard:0.0.4-srcfix`，再导入 kind。
 
-另外还有一个已经在实机部署中确认过的例外：
-
-- `docker.io/codewisdom/ts-ui-dashboard:0.0.4` 这个公开镜像**不能视为严格对应 `tag 0.0.4` 源码**。镜像内的 `nginx.conf` 额外引用了 `ts-avatar-service`，但 `0.0.4` 的 `quickstart-k8s-deployment` 清单并没有部署这个服务，因此直接使用该公开镜像会导致 `ts-ui-dashboard` `CrashLoopBackOff`
-- `m.daocloud.io/docker.io/codewisdom/ts-ui-dashboard:0.0.4` 只是镜像站，不是另一份“更老、更正确”的构建；其内容与 Docker Hub 上这份镜像一致，也同样包含 `ts-avatar-service`
-- 本文不再依赖任何第三方修正版 dashboard 镜像；统一要求复现者在本机基于仓库中的 `ts-ui-dashboard/` 目录自行构建 `localhost/ts-ui-dashboard:0.0.4-srcfix`，再由 `kind load` 导入集群
-
-这意味着：
-
-- 按本文部署时，应优先把“清单 + 预构建镜像”当作一套可运行基线
-- 不要默认“本地 `mvn package` 打出来的 jar 可以无缝替换当前 `0.0.4` 镜像”
-- 如果你要做源码级 canary，请先核对目标服务是否仍使用 `Mongo` 版配置，再决定是否直接替换
-- 如果你希望得到“源码与运行内容尽量一致”的可复现基线，请把 `ts-ui-dashboard` 视为**需要单独修正**的组件：本文采用“复现者本地构建本地 tag”的方式，把这一步明确纳入标准流程
+如果你后续要做源码级 canary，请先核对目标服务是否仍使用 `Mongo` 版配置，不要默认本地 `mvn package` 产物可以直接替换当前 `0.0.4` 运行镜像。
 
 ---
 
@@ -242,11 +228,11 @@ kubectl cluster-info --context kind-tt
 
 Istio 安装完成后，后续部署到开启注入的 namespace（例如 `trainticket`）时，Pod 会多一个 `istio-proxy` sidecar，从而产出 `istio_requests_total`、`istio_request_duration_*` 等指标。
 
-这一节统一采用一种标准走法：先预加载 Istio 镜像到 kind，再安装 Istio。建议用两个终端同时进行：
+先准备并导入 `Istio` 镜像，再安装。建议用两个终端同时进行：
 - 终端 A：执行预加载和安装
 - 终端 B：观察 Pod 与 events
 
-终端 A：预加载 Istio 镜像到 kind（tt）。
+终端 A，先在宿主机准备 `Istio` 镜像：
 
 ```bash
 ISTIO_VERSION="1.23.0"
@@ -256,6 +242,12 @@ docker pull "docker.m.daocloud.io/istio/proxyv2:${ISTIO_VERSION}"
 
 docker tag "docker.m.daocloud.io/istio/pilot:${ISTIO_VERSION}" "docker.io/istio/pilot:${ISTIO_VERSION}"
 docker tag "docker.m.daocloud.io/istio/proxyv2:${ISTIO_VERSION}" "docker.io/istio/proxyv2:${ISTIO_VERSION}"
+```
+
+终端 A，再把 `Istio` 镜像导入 kind（`tt`）：
+
+```bash
+ISTIO_VERSION="1.23.0"
 
 kind load docker-image "docker.io/istio/pilot:${ISTIO_VERSION}" --name tt
 kind load docker-image "docker.io/istio/proxyv2:${ISTIO_VERSION}" --name tt
@@ -280,9 +272,7 @@ Prometheus 的定位是“指标数据库”。我们后续用它的 `query_rang
 
 建议用两个终端同时进行。
 
-这一节统一采用一种标准走法：先把 kube-prometheus-stack 相关镜像预加载到 kind，再安装。
-
-如果你的环境里 kind 节点经常拉镜像超时（包括 events 里出现 `proxyconnect tcp ... 127.0.0.1:7890 ... refused` 或 `i/o timeout`），建议先用 `helm template` 把 kube-prometheus-stack 会用到的镜像提取出来，预加载到 kind（`tt`），再执行安装。
+先准备并导入 `kube-prometheus-stack` 镜像，再安装。
 
 终端 A，先添加 Helm 仓库并更新索引：
 
@@ -291,13 +281,41 @@ helm repo add prometheus-community https://prometheus-community.github.io/helm-c
 helm repo update
 ```
 
-终端 A，再预加载 kube-prometheus-stack 镜像到 kind（`tt`）：
+终端 A，下载本次固定使用的 chart 到本地目录：
 
 ```bash
-TMP="$(mktemp)"
-helm template monitoring prometheus-community/kube-prometheus-stack -n monitoring > "$TMP"
+PROM_CHART_VERSION="82.17.0"
+PROM_CHART_ROOT="/tmp/tt-kube-prometheus-stack-chart"
 
-IMGS="$(awk '/^[[:space:]]*image:[[:space:]]*/{print $2}' "$TMP" | sed "s/[\"']//g" | sort -u)"
+rm -rf "$PROM_CHART_ROOT"
+mkdir -p "$PROM_CHART_ROOT"
+
+helm pull prometheus-community/kube-prometheus-stack \
+  --version "$PROM_CHART_VERSION" \
+  --untar \
+  --untardir "$PROM_CHART_ROOT"
+```
+
+终端 A，再基于本地 chart 渲染 manifest：
+
+```bash
+PROM_CHART_ROOT="/tmp/tt-kube-prometheus-stack-chart"
+PROM_CHART="$PROM_CHART_ROOT/kube-prometheus-stack"
+PROM_TMP="/tmp/tt-kube-prometheus-stack-rendered.yaml"
+
+helm template monitoring "$PROM_CHART" -n monitoring > "$PROM_TMP"
+```
+
+终端 A，再在宿主机准备 `kube-prometheus-stack` 镜像，并生成待导入列表：
+
+```bash
+PROM_CHART_ROOT="/tmp/tt-kube-prometheus-stack-chart"
+PROM_CHART="$PROM_CHART_ROOT/kube-prometheus-stack"
+PROM_TMP="/tmp/tt-kube-prometheus-stack-rendered.yaml"
+PROM_LOAD_LIST="/tmp/tt-kube-prometheus-stack-images.txt"
+
+IMGS="$(awk '/^[[:space:]]*image:[[:space:]]*/{print $2}' "$PROM_TMP" | sed "s/[\"']//g" | sort -u)"
+: > "$PROM_LOAD_LIST"
 
 for IMG in $IMGS; do
   [ -z "$IMG" ] && continue
@@ -325,26 +343,38 @@ for IMG in $IMGS; do
       SRC="docker.gh-proxy.com/$CANON"
     fi
     docker pull "$SRC" || docker pull "$CANON" || docker pull "$IMG" || {
-      echo "WARN: pull failed, skip: $CANON" >&2
-      continue
+      echo "ERROR: pull failed: $CANON" >&2
+      exit 1
     }
     docker tag "$SRC" "$CANON" 2>/dev/null || true
     docker tag "$SRC" "$IMG" 2>/dev/null || true
   fi
 
   docker tag "$IMG" "$CANON" 2>/dev/null || true
-  kind load docker-image "$CANON" --name tt
+  printf '%s\n' "$CANON" >> "$PROM_LOAD_LIST"
 done
 
-rm -f "$TMP"
+sort -u "$PROM_LOAD_LIST" -o "$PROM_LOAD_LIST"
+```
+
+终端 A，再把 `kube-prometheus-stack` 镜像导入 kind（`tt`）：
+
+```bash
+PROM_LOAD_LIST="/tmp/tt-kube-prometheus-stack-images.txt"
+
+while IFS= read -r IMG; do
+  [ -z "$IMG" ] && continue
+  kind load docker-image "$IMG" --name tt
+done < "$PROM_LOAD_LIST"
 ```
 
 终端 A，执行安装命令并等待返回（不要 `Ctrl+C`）：
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace --wait
+PROM_CHART_ROOT="/tmp/tt-kube-prometheus-stack-chart"
+PROM_CHART="$PROM_CHART_ROOT/kube-prometheus-stack"
+
+helm upgrade --install monitoring "$PROM_CHART" -n monitoring --create-namespace --wait
 ```
 
 终端 B，检查是否正常就绪：
@@ -424,27 +454,38 @@ kubectl -n monitoring get podmonitor
 
 #### 6.5 部署 Train‑Ticket
 
-这一节统一采用一种标准走法：先按清单把全部镜像预加载到 kind，再部署业务。这样做的目的，是把网络抖动、镜像站可用性和 `ImagePullBackOff` 尽量前置解决，避免后面在业务已经 apply 之后再进入“边启动边救火”的不稳定状态。
+先按清单把 `Train‑Ticket` 镜像准备好并导入 kind，再部署业务。
 
 ```bash
 kubectl create ns trainticket || true
 kubectl label ns trainticket istio-injection=enabled --overwrite
 ```
 
-当前 `quickstart-k8s-deployment/` 目录中的 YAML 已经是本文对应的最终版本，不需要在部署前再通过命令行对 YAML 做二次修正。你只需要额外完成一件事：在 `apply` 业务清单之前，先基于当前仓库里的 `ts-ui-dashboard` 源码目录重打一份修正版镜像。这样做的目的不是“改业务逻辑”，而是让运行时 `nginx.conf` 与 `tag 0.0.4` 的源码内容重新对齐。这里使用 `localhost/...` 这个本地 tag，是为了明确说明这是一份**由复现者本机构建、再导入 kind** 的镜像，而不是一个需要从远程 registry 拉取的第三方镜像。
+当前 `quickstart-k8s-deployment/` 目录中的 YAML 已经是本文对应的最终版本，不需要在部署前再通过命令行对 YAML 做二次修正。额外只需要做一件事：在 `apply` 前，基于当前仓库里的 `ts-ui-dashboard` 源码目录重打一份修正版镜像。这里使用 `localhost/...` 这个本地 tag，是为了明确说明这是一份本机构建、再导入 kind 的镜像，而不是远程 registry 中的第三方镜像。
+
+先准备 dashboard 构建所需的基础镜像：
+
+```bash
+docker pull docker.m.daocloud.io/openresty/openresty:trusty
+docker tag docker.m.daocloud.io/openresty/openresty:trusty docker.io/openresty/openresty:trusty
+```
+
+再基于当前仓库里的 `ts-ui-dashboard/` 目录构建本地镜像：
 
 ```bash
 docker build -t localhost/ts-ui-dashboard:0.0.4-srcfix \
   "benchmarks/trainticket/train-ticket/ts-ui-dashboard"
 ```
 
-先把清单里引用到的镜像一次性预加载到 kind（`tt`）。这一步完成后，再去 apply 业务清单，通常不会出现大量 `ImagePullBackOff`。
+先在宿主机准备清单里引用到的镜像，并生成待导入列表：
 
 ```bash
+TT_LOAD_LIST="/tmp/tt-train-ticket-images.txt"
 DIR="benchmarks/trainticket/train-ticket/deployment/quickstart-k8s-deployment"
 FILES="$DIR/quickstart-ts-deployment-part1.yml $DIR/quickstart-ts-deployment-part2.yml $DIR/quickstart-ts-deployment-part3.yml"
 
 IMGS="$(awk '/^[[:space:]]*image:[[:space:]]*/{print $2}' $FILES | sed "s/[\"']//g" | sort -u)"
+: > "$TT_LOAD_LIST"
 
 for IMG in $IMGS; do
   [ -z "$IMG" ] && continue
@@ -460,6 +501,10 @@ for IMG in $IMGS; do
   fi
 
   if ! docker image inspect "$CANON" >/dev/null 2>&1 && ! docker image inspect "$IMG" >/dev/null 2>&1; then
+    if [[ "$CANON" == localhost/* ]]; then
+      echo "ERROR: local image missing, please build it first: $CANON" >&2
+      exit 1
+    fi
     if [[ "$CANON" == docker.io/* ]]; then
       SRC="docker.m.daocloud.io/${CANON#docker.io/}"
     elif [[ "$CANON" == quay.io/* ]]; then
@@ -476,17 +521,35 @@ for IMG in $IMGS; do
   fi
 
   docker tag "$IMG" "$CANON" 2>/dev/null || true
-  kind load docker-image "$CANON" --name tt
+  printf '%s\n' "$CANON" >> "$TT_LOAD_LIST"
 done
+
+sort -u "$TT_LOAD_LIST" -o "$TT_LOAD_LIST"
+```
+
+再把这组业务镜像统一导入 kind（`tt`）：
+
+```bash
+TT_LOAD_LIST="/tmp/tt-train-ticket-images.txt"
+
+while IFS= read -r IMG; do
+  [ -z "$IMG" ] && continue
+  kind load docker-image "$IMG" --name tt
+done < "$TT_LOAD_LIST"
+
+rm -f "$TT_LOAD_LIST"
 ```
 
 说明：
 - `localhost/ts-ui-dashboard:0.0.4-srcfix` 不会从远程 registry 拉取，它应该在上面的 `docker build` 步骤中已经存在于宿主机本地
-- 这段预加载循环会把本地镜像和远程镜像一起导入 `kind`，因此不需要再额外手工执行一条单独的 `kind load` 命令
+- 这段预加载脚本会先把本地镜像和远程镜像统一准备到宿主机，再由第二段循环统一导入 `kind`
+- 因此不需要再额外手工执行一条单独的 `kind load` 命令
 
-预加载完成后，直接 apply 当前目录中的业务清单，然后观察启动进度。
+镜像导入完成后，直接 apply 当前目录中的业务清单，然后观察启动进度。
 
 ```bash
+DIR="benchmarks/trainticket/train-ticket/deployment/quickstart-k8s-deployment"
+
 kubectl -n trainticket apply -f "$DIR/quickstart-ts-deployment-part1.yml"
 kubectl -n trainticket apply -f "$DIR/quickstart-ts-deployment-part2.yml"
 kubectl -n trainticket apply -f "$DIR/quickstart-ts-deployment-part3.yml"
@@ -626,7 +689,63 @@ sudo rm -f /usr/local/bin/istioctl
 rm -rf istio-1.23.0
 ```
 
-#### 10.3 卸载 Docker（docker-ce）
+#### 10.3 清理本次任务相关镜像（推荐）
+
+如果你希望验证“镜像是否能够重新拉取 / 文档是否能在无缓存条件下重跑”，建议在保留 Docker 的前提下，先清掉本次任务相关镜像，再重新执行本文流程。
+
+先查看当前本机还保留了哪些相关镜像：
+
+```bash
+docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' | \
+  grep -E 'codewisdom|ts-ui-dashboard|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
+```
+
+删除本次任务相关镜像：
+
+```bash
+docker rmi localhost/ts-ui-dashboard:0.0.4-srcfix 2>/dev/null || true
+docker rmi codewisdom/ts-ui-dashboard:0.0.4-srcfix 2>/dev/null || true
+docker rmi jaegertracing/all-in-one:1.76.0 2>/dev/null || true
+docker rmi jaegertracing/all-in-one:latest 2>/dev/null || true
+docker rmi docker.m.daocloud.io/jaegertracing/all-in-one:latest 2>/dev/null || true
+docker rmi mongo:4.4 2>/dev/null || true
+docker rmi docker.m.daocloud.io/library/mongo:4.4 2>/dev/null || true
+docker rmi mongo:latest 2>/dev/null || true
+docker rmi mysql:5.6.35 2>/dev/null || true
+docker rmi istio/pilot:1.23.0 2>/dev/null || true
+docker rmi docker.m.daocloud.io/istio/pilot:1.23.0 2>/dev/null || true
+docker rmi istio/proxyv2:1.23.0 2>/dev/null || true
+docker rmi docker.m.daocloud.io/istio/proxyv2:1.23.0 2>/dev/null || true
+
+docker images --format '{{.Repository}}:{{.Tag}}' | \
+  grep -E '^(codewisdom|docker\.io/codewisdom)/ts-.*:0\.0\.4$' | \
+  xargs -r docker rmi
+
+docker images --format '{{.Repository}}:{{.Tag}}' | \
+  grep -E 'prometheus|alertmanager|grafana|prometheus-operator|k8s-sidecar|node-exporter|kube-state-metrics' | \
+  xargs -r docker rmi
+```
+
+清理完成后，再次检查：
+
+```bash
+docker images --format '{{.Repository}}:{{.Tag}}' | \
+  grep -E 'codewisdom|ts-ui-dashboard|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
+```
+
+如果你还想单独验证几个关键镜像能否重新获取，可以先手工执行：
+
+```bash
+docker pull openresty/openresty:trusty
+docker pull docker.m.daocloud.io/istio/pilot:1.23.0
+docker pull docker.m.daocloud.io/istio/proxyv2:1.23.0
+docker pull docker.io/codewisdom/ts-travel-service:0.0.4
+docker pull jaegertracing/all-in-one:1.76.0
+docker pull mongo:4.4
+docker pull mysql:5.6.35
+```
+
+#### 10.4 卸载 Docker（docker-ce）
 
 卸载 docker-ce 相关软件包。
 
@@ -642,7 +761,7 @@ sudo rm -rf /var/lib/docker
 sudo rm -rf /var/lib/containerd
 ```
 
-#### 10.4 移除 Docker 官方 apt 源（可选）
+#### 10.5 移除 Docker 官方 apt 源（可选）
 
 删除 Docker apt 源配置与密钥文件，然后刷新 apt 索引。
 
@@ -652,7 +771,7 @@ sudo rm -f /etc/apt/keyrings/docker.gpg
 sudo apt update
 ```
 
-#### 10.5 清理本仓库的实验产物（runs）
+#### 10.6 清理本仓库的实验产物（runs）
 
 删除本地实验产物目录。
 
