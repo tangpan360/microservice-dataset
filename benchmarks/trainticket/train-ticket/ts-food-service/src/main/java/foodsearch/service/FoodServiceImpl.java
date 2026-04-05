@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -171,13 +172,9 @@ public class FoodServiceImpl implements FoodService {
                         new ParameterizedTypeReference<Response<String>>() {
                         });
                 Response<String> startStationId = reStartStationId.getBody();
-
-                for (int i = 0; i < stations.size(); i++) {
-                    if (stations.get(i).equals(startStationId.getData())) {
-                        break;
-                    } else {
-                        stations.remove(i);
-                    }
+                stations = selectStationsInRange(stations, startStationId.getData(), null);
+                if (stations.isEmpty()) {
+                    return new Response<>(0, "Start station is not on this route", null);
                 }
             }
             if (null != endStation && !"".equals(endStation)) {
@@ -190,14 +187,14 @@ public class FoodServiceImpl implements FoodService {
                         new ParameterizedTypeReference<Response<String>>() {
                         });
                 Response endStationId = reEndStationId.getBody();
-
-                for (int i = stations.size() - 1; i >= 0; i--) {
-                    if (stations.get(i).equals(endStationId.getData())) {
-                        break;
-                    } else {
-                        stations.remove(i);
-                    }
+                stations = selectStationsInRange(stations, null, (String) endStationId.getData());
+                if (stations.isEmpty()) {
+                    return new Response<>(0, "End station is not on this route", null);
                 }
+            }
+
+            if (stations.isEmpty()) {
+                return new Response<>(0, "No stations available for food query", null);
             }
 
             HttpEntity requestEntityFoodStoresListResult = new HttpEntity(stations, headers);
@@ -224,5 +221,34 @@ public class FoodServiceImpl implements FoodService {
         allTripFood.setTrainFoodList(trainFoodList);
         allTripFood.setFoodStoreListMap(foodStoreListMap);
         return new Response<>(1, "Get All Food Success", allTripFood);
+    }
+
+    public static List<String> selectStationsInRange(List<String> stations, String startStationId, String endStationId) {
+        if (stations == null || stations.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        int startIndex = 0;
+        int endIndex = stations.size() - 1;
+
+        if (startStationId != null && !"".equals(startStationId)) {
+            startIndex = stations.indexOf(startStationId);
+            if (startIndex < 0) {
+                return new ArrayList<>();
+            }
+        }
+
+        if (endStationId != null && !"".equals(endStationId)) {
+            endIndex = stations.indexOf(endStationId);
+            if (endIndex < 0) {
+                return new ArrayList<>();
+            }
+        }
+
+        if (startIndex > endIndex) {
+            return new ArrayList<>();
+        }
+
+        return new ArrayList<>(stations.subList(startIndex, endIndex + 1));
     }
 }

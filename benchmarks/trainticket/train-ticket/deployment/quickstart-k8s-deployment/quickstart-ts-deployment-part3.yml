@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: ts-ui-dashboard
-        image: localhost/ts-ui-dashboard:0.0.4-srcfix
+        image: tangpan360/ts-ui-dashboard:0.0.4
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080

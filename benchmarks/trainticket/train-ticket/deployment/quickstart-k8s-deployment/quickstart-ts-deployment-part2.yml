@@ -546,7 +546,7 @@ spec:
     spec:
       containers:
       - name: ts-food-service
-        image: docker.io/codewisdom/ts-food-service:0.0.4
+        image: tangpan360/ts-food-service:0.0.4
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 18856

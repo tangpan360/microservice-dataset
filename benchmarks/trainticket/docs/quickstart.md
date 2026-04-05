@@ -31,11 +31,11 @@ mvn -version
 
 本次部署以 `quickstart-k8s-deployment` 和对应的 `0.0.4` 预构建镜像作为可运行基线，不混入仓库后续版本中的新服务、新接口或新配置。
 
-已确认的一个例外是：`docker.io/codewisdom/ts-ui-dashboard:0.0.4` 不能视为严格对应 `tag 0.0.4` 源码。该镜像内的 `nginx.conf` 额外引用了 `ts-avatar-service`，而 `0.0.4` 清单并未部署该服务，直接使用会导致 `ts-ui-dashboard` `CrashLoopBackOff`。`m.daocloud.io/docker.io/codewisdom/ts-ui-dashboard:0.0.4` 只是镜像站，其内容与 Docker Hub 上这份镜像一致。
+本流程默认使用以下修正版镜像：
+- `tangpan360/ts-ui-dashboard:0.0.4`
+- `tangpan360/ts-food-service:0.0.4`
 
-因此，本文统一要求复现者基于仓库中的 `ts-ui-dashboard/` 目录本地构建 `localhost/ts-ui-dashboard:0.0.4-srcfix`，再导入 kind。
-
-如果你后续要做源码级 canary，请先核对目标服务是否仍使用 `Mongo` 版配置，不要默认本地 `mvn package` 产物可以直接替换当前 `0.0.4` 运行镜像。
+其余服务仍按 `quickstart-k8s-deployment` 中的镜像配置拉取并部署。
 
 ---
 
@@ -429,23 +429,16 @@ kubectl create ns trainticket || true
 kubectl label ns trainticket istio-injection=enabled --overwrite
 ```
 
-当前 `quickstart-k8s-deployment/` 目录中的 YAML 已经是本文对应的最终版本，不需要在部署前再通过命令行对 YAML 做二次修正。额外只需要做一件事：在 `apply` 前，基于当前仓库里的 `ts-ui-dashboard` 源码目录重打一份修正版镜像。这里使用 `localhost/...` 这个本地 tag，是为了明确说明这是一份本机构建、再导入 kind 的镜像，而不是远程 registry 中的第三方镜像。
+当前 `quickstart-k8s-deployment/` 目录中的 YAML 已经是本文对应的最终版本，不需要在部署前再通过命令行对 YAML 做二次修正。其中 `ts-ui-dashboard` 和 `ts-food-service` 直接使用 Docker Hub 上的修正版镜像 `tangpan360/ts-ui-dashboard:0.0.4` 与 `tangpan360/ts-food-service:0.0.4`。
 
-先准备 dashboard 构建所需的基础镜像：
-
-```bash
-docker pull docker.m.daocloud.io/openresty/openresty:trusty
-docker tag docker.m.daocloud.io/openresty/openresty:trusty docker.io/openresty/openresty:trusty
-```
-
-再基于当前仓库里的 `ts-ui-dashboard/` 目录构建本地镜像：
+如需先把它们显式拉到宿主机，可以执行：
 
 ```bash
-docker build -t localhost/ts-ui-dashboard:0.0.4-srcfix \
-  "benchmarks/trainticket/train-ticket/ts-ui-dashboard"
+docker pull tangpan360/ts-ui-dashboard:0.0.4
+docker pull tangpan360/ts-food-service:0.0.4
 ```
 
-先在宿主机准备清单里引用到的镜像，并生成待导入列表：
+先在宿主机准备清单里引用到的镜像，并生成待导入列表。如果宿主机里还没有，下面这段脚本会自动拉取并统一导入 kind：
 
 ```bash
 TT_LOAD_LIST="/tmp/tt-train-ticket-images.txt"
@@ -461,7 +454,7 @@ for IMG in $IMGS; do
   CANON="$IMG"
   if [[ "$IMG" == */* ]]; then
     first="${IMG%%/*}"
-    if [[ "$first" != *.* && "$first" != *:* && "$first" != "localhost" ]]; then
+    if [[ "$first" != *.* && "$first" != *:* ]]; then
       CANON="docker.io/$IMG"
     fi
   else
@@ -469,10 +462,6 @@ for IMG in $IMGS; do
   fi
 
   if ! docker image inspect "$CANON" >/dev/null 2>&1 && ! docker image inspect "$IMG" >/dev/null 2>&1; then
-    if [[ "$CANON" == localhost/* ]]; then
-      echo "ERROR: local image missing, please build it first: $CANON" >&2
-      exit 1
-    fi
     if [[ "$CANON" == docker.io/* ]]; then
       SRC="docker.m.daocloud.io/${CANON#docker.io/}"
     elif [[ "$CANON" == quay.io/* ]]; then
@@ -509,9 +498,8 @@ rm -f "$TT_LOAD_LIST"
 ```
 
 说明：
-- `localhost/ts-ui-dashboard:0.0.4-srcfix` 不会从远程 registry 拉取，它应该在上面的 `docker build` 步骤中已经存在于宿主机本地
-- 这段预加载脚本会先把本地镜像和远程镜像统一准备到宿主机，再由第二段循环统一导入 `kind`
-- 因此不需要再额外手工执行一条单独的 `kind load` 命令
+- `tangpan360/ts-ui-dashboard:0.0.4` 和 `tangpan360/ts-food-service:0.0.4` 会像其他业务镜像一样被拉取并导入 kind
+- 这段预加载脚本会先把镜像准备到宿主机，再由第二段循环统一导入 `kind`
 
 镜像导入完成后，直接 apply 当前目录中的业务清单，然后观察启动进度。
 
@@ -525,6 +513,22 @@ kubectl -n trainticket apply -f "$DIR/quickstart-ts-deployment-part3.yml"
 kubectl -n trainticket get pods -o wide
 kubectl -n trainticket get deploy
 ```
+
+#### 6.5 部署后立即验证动作链路
+
+部署完成后，建议立刻做一次动作级回归验证：
+
+```bash
+cd "benchmarks/trainticket/load_injector"
+
+NODE_IP="$(docker inspect tt-control-plane --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+TT_BASE_URL="http://$NODE_IP:32677" python -m tt_injector.cli.check_actions
+```
+
+如果你只想单独验证 `query_food`，重点看输出里是否出现：
+- `"action": "query_food"`
+- `"ok": true`
+- `"msg":"Get All Food Success"`
 
 ---
 
@@ -665,14 +669,14 @@ rm -rf istio-1.23.0
 
 ```bash
 docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' | \
-  grep -E 'codewisdom|ts-ui-dashboard|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
+  grep -E 'codewisdom|ts-ui-dashboard|ts-food-service|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
 ```
 
 删除本次任务相关镜像：
 
 ```bash
-docker rmi localhost/ts-ui-dashboard:0.0.4-srcfix 2>/dev/null || true
-docker rmi codewisdom/ts-ui-dashboard:0.0.4-srcfix 2>/dev/null || true
+docker rmi tangpan360/ts-ui-dashboard:0.0.4 2>/dev/null || true
+docker rmi tangpan360/ts-food-service:0.0.4 2>/dev/null || true
 docker rmi jaegertracing/all-in-one:1.76.0 2>/dev/null || true
 docker rmi jaegertracing/all-in-one:latest 2>/dev/null || true
 docker rmi docker.m.daocloud.io/jaegertracing/all-in-one:latest 2>/dev/null || true
@@ -698,7 +702,7 @@ docker images --format '{{.Repository}}:{{.Tag}}' | \
 
 ```bash
 docker images --format '{{.Repository}}:{{.Tag}}' | \
-  grep -E 'codewisdom|ts-ui-dashboard|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
+  grep -E 'codewisdom|ts-ui-dashboard|ts-food-service|jaegertracing|istio/|prometheus|grafana|mongo|mysql' || true
 ```
 
 如果你还想单独验证几个关键镜像能否重新获取，可以先手工执行：

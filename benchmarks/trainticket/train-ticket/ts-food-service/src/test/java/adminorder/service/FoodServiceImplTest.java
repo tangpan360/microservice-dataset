@@ -125,4 +125,31 @@ public class FoodServiceImplTest {
 
     }
 
+    @Test
+    public void testSelectStationsInRangeKeepsContinuousSegment() {
+        List<String> stations = new ArrayList<>();
+        stations.add("nanjing");
+        stations.add("suzhou");
+        stations.add("shanghai");
+        stations.add("hangzhou");
+
+        List<String> result = FoodServiceImpl.selectStationsInRange(stations, "suzhou", "shanghai");
+
+        Assert.assertEquals(2, result.size());
+        Assert.assertEquals("suzhou", result.get(0));
+        Assert.assertEquals("shanghai", result.get(1));
+    }
+
+    @Test
+    public void testSelectStationsInRangeReturnsEmptyWhenOrderInvalid() {
+        List<String> stations = new ArrayList<>();
+        stations.add("nanjing");
+        stations.add("suzhou");
+        stations.add("shanghai");
+
+        List<String> result = FoodServiceImpl.selectStationsInRange(stations, "shanghai", "suzhou");
+
+        Assert.assertTrue(result.isEmpty());
+    }
+
 }
