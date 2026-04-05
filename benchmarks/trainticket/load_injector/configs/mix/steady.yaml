@@ -1,0 +1,23 @@
+name: steady
+description: 恒定负载示例
+
+phases:
+  - name: steady-20m
+    duration_min: 20
+    users: 20
+    spawn_rate: 5
+    mix:
+      browseBasic: 0.24
+      browsePlusRoute: 0.10
+      browseAdvanced: 0.08
+      orderRefresh: 0.10
+      contactLookup: 0.05
+      preserveAndPay: 0.14
+      preserveWithFood: 0.05
+      preserveWithAssurance: 0.05
+      payCollectEnter: 0.07
+      cancelFlow: 0.04
+      rebookFlow: 0.03
+      consignFlow: 0.02
+      postPurchaseOrderView: 0.02
+      adminObserve: 0.01

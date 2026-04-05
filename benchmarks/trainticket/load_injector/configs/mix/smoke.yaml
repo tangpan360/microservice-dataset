@@ -1,0 +1,18 @@
+name: smoke
+description: 最小功能验证配置
+
+phases:
+  - name: smoke-1m
+    duration_min: 1
+    users: 1
+    spawn_rate: 1
+    mix:
+      browseBasic: 0.20
+      browseAdvanced: 0.10
+      orderRefresh: 0.10
+      preserveAndPay: 0.15
+      preserveWithFood: 0.10
+      preserveWithAssurance: 0.10
+      payCollectEnter: 0.10
+      consignFlow: 0.10
+      adminObserve: 0.05

@@ -1,0 +1,43 @@
+name: step
+description: 阶梯负载示例
+
+phases:
+  - name: step-1
+    duration_min: 10
+    users: 10
+    spawn_rate: 5
+    mix:
+      browseBasic: 0.28
+      browsePlusRoute: 0.10
+      browseAdvanced: 0.08
+      orderRefresh: 0.12
+      contactLookup: 0.06
+      preserveAndPay: 0.14
+      preserveWithFood: 0.04
+      preserveWithAssurance: 0.04
+      payCollectEnter: 0.05
+      cancelFlow: 0.03
+      rebookFlow: 0.02
+      consignFlow: 0.01
+      postPurchaseOrderView: 0.02
+      adminObserve: 0.01
+  - name: step-2
+    duration_min: 10
+    users: 20
+    spawn_rate: 5
+    mix:
+      browseBasic: 0.20
+      browsePlusRoute: 0.10
+      browseAdvanced: 0.08
+      browseAdvancedAlt: 0.05
+      orderRefresh: 0.10
+      contactLookup: 0.05
+      preserveAndPay: 0.15
+      preserveWithFood: 0.06
+      preserveWithAssurance: 0.06
+      payCollectEnter: 0.06
+      cancelFlow: 0.03
+      rebookFlow: 0.02
+      consignFlow: 0.01
+      foodBrowseOnly: 0.02
+      postPurchaseOrderView: 0.01

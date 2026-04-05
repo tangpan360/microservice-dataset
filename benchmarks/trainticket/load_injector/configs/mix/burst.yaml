@@ -1,0 +1,43 @@
+name: burst
+description: 稳态上叠加突发负载
+
+phases:
+  - name: warmup
+    duration_min: 10
+    users: 10
+    spawn_rate: 5
+    mix:
+      browseBasic: 0.28
+      browsePlusRoute: 0.08
+      browseAdvanced: 0.08
+      orderRefresh: 0.12
+      contactLookup: 0.05
+      preserveAndPay: 0.14
+      preserveWithFood: 0.04
+      preserveWithAssurance: 0.04
+      payCollectEnter: 0.05
+      cancelFlow: 0.04
+      rebookFlow: 0.03
+      consignFlow: 0.02
+      postPurchaseOrderView: 0.02
+      adminObserve: 0.01
+  - name: burst
+    duration_min: 5
+    users: 35
+    spawn_rate: 10
+    mix:
+      browseBasic: 0.18
+      browsePlusRoute: 0.10
+      browseAdvanced: 0.08
+      browseAdvancedAlt: 0.05
+      orderRefresh: 0.10
+      contactLookup: 0.04
+      preserveAndPay: 0.16
+      preserveWithFood: 0.07
+      preserveWithAssurance: 0.07
+      payCollectEnter: 0.05
+      cancelFlow: 0.04
+      rebookFlow: 0.03
+      consignFlow: 0.01
+      foodBrowseOnly: 0.01
+      postPurchaseOrderView: 0.01
