@@ -385,6 +385,24 @@ kubectl -n monitoring get pods | grep -E 'ErrImagePull|ImagePullBackOff|Init:' |
 kubectl -n monitoring get events --sort-by=.lastTimestamp | tail -n 30
 ```
 
+如果这里看到 `prometheus-monitoring-kube-prometheus-prometheus-0` 或 `alertmanager-monitoring-kube-prometheus-alertmanager-0` 卡在 `ErrImagePull` / `ImagePullBackOff`，并且事件里出现类似下面的报错：
+
+```text
+Failed to pull image "quay.io/prometheus-operator/prometheus-config-reloader:v0.89.0"
+```
+
+可以手工预拉并导入这个镜像，然后再让 Pod 重建：
+
+```bash
+docker pull quay.m.daocloud.io/prometheus-operator/prometheus-config-reloader:v0.89.0
+docker tag quay.m.daocloud.io/prometheus-operator/prometheus-config-reloader:v0.89.0 quay.io/prometheus-operator/prometheus-config-reloader:v0.89.0
+kind load docker-image quay.io/prometheus-operator/prometheus-config-reloader:v0.89.0 --name tt
+
+kubectl -n monitoring delete pod alertmanager-monitoring-kube-prometheus-alertmanager-0
+kubectl -n monitoring delete pod prometheus-monitoring-kube-prometheus-prometheus-0
+kubectl -n monitoring get pods -o wide
+```
+
 #### 6.4 让 Prometheus 抓取 Istio sidecar 指标
 
 这一步决定你后续是否能在 Prometheus 里查到 `istio_requests_total`、`istio_request_duration_*` 等 Istio 指标。
@@ -429,14 +447,7 @@ kubectl create ns trainticket || true
 kubectl label ns trainticket istio-injection=enabled --overwrite
 ```
 
-当前 `quickstart-k8s-deployment/` 目录中的 YAML 已经是本文对应的最终版本，不需要在部署前再通过命令行对 YAML 做二次修正。其中 `ts-ui-dashboard` 和 `ts-food-service` 直接使用 Docker Hub 上的修正版镜像 `tangpan360/ts-ui-dashboard:0.0.4` 与 `tangpan360/ts-food-service:0.0.4`。
-
-如需先把它们显式拉到宿主机，可以执行：
-
-```bash
-docker pull tangpan360/ts-ui-dashboard:0.0.4
-docker pull tangpan360/ts-food-service:0.0.4
-```
+`quickstart-k8s-deployment/` 目录中的 YAML 可直接用于本文流程。其中 `ts-ui-dashboard` 和 `ts-food-service` 使用 Docker Hub 上的修正版镜像 `tangpan360/ts-ui-dashboard:0.0.4` 与 `tangpan360/ts-food-service:0.0.4`。
 
 先在宿主机准备清单里引用到的镜像，并生成待导入列表。如果宿主机里还没有，下面这段脚本会自动拉取并统一导入 kind：
 
