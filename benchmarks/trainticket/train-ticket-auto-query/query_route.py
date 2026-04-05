@@ -1,11 +1,21 @@
-from atomic_queries import _query_route
+import time
+
+from atomic_queries import _query_route, build_user_headers, get_env_value, get_iterations
+
+def query_route(headers):
+    route_id = get_env_value("TT_ROUTE_ID", "92708982-77af-4318-be25-57ccb0ff69ad")
+    _query_route(routeId=route_id, headers=headers)
+    print(f"route_id: {route_id}")
+
 
 if __name__ == '__main__':
+    headers = build_user_headers()
+    iterations = get_iterations()
+    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    headers = {
-        "Cookie": "JSESSIONID=CAF07ABCB2031807D1C6043730C69F17; YsbCaptcha=ABF26F4AE563405894B1540057F62E7B",
-        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmZHNlX21pY3Jvc2VydmljZSIsInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJpZCI6IjRkMmE0NmM3LTcxY2ItNGNmMS1iNWJiLWI2ODQwNmQ5ZGE2ZiIsImlhdCI6MTYyNjM0NDgyNSwiZXhwIjoxNjI2MzQ4NDI1fQ.4eOMmQDhnq-Hjj1DuiH8duT6rXkP0QfeTnaXwvYGKD4",
-        "Content-Type": "application/json"
-    }
+    for i in range(iterations):
+        query_route(headers=headers)
+        print("*****************************INDEX:" + str(i))
 
-    _query_route(headers=headers)
+    end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(f"start:{start_time} end:{end_time}")

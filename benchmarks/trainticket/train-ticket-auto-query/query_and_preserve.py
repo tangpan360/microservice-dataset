@@ -1,4 +1,4 @@
-from atomic_queries import _query_high_speed_ticket, _query_normal_ticket, _query_assurances, _query_food, _query_contacts
+from atomic_queries import _query_high_speed_ticket, _query_normal_ticket, _query_assurances, _query_food, _query_contacts, build_user_headers, get_iterations, base_address, get_current_uuid, REQUEST_TIMEOUT, get_env_value, _request_with_retry, _response_json
 from utils import random_boolean, random_phone, random_str, random_form_list
 
 import logging
@@ -7,11 +7,41 @@ import requests
 import time
 
 logger = logging.getLogger("query_and_preserve")
-# The UUID of user fdse_microservice is that
-uuid = "4d2a46c7-71cb-4cf1-b5bb-b68406d9da6f"
 date = time.strftime("%Y-%m-%d", time.localtime())
 
-base_address = "http://139.196.152.44:31000"
+
+def resolve_toggle(name: str) -> bool:
+    value = get_env_value(name, "auto").lower()
+    if value in ("1", "true", "yes", "y", "on"):
+        return True
+    if value in ("0", "false", "no", "n", "off"):
+        return False
+    return random_boolean()
+
+
+def resolve_preserve_query():
+    mode = get_env_value("TT_PRESERVE_MODE", "auto").lower()
+    if mode not in ("auto", "high_speed", "normal"):
+        mode = "auto"
+
+    if mode == "high_speed":
+        high_speed = True
+    elif mode == "normal":
+        high_speed = False
+    else:
+        high_speed = random_boolean()
+
+    default_start = "Shang Hai"
+    default_end = "Su Zhou" if high_speed else "Nan Jing"
+    return {
+        "high_speed": high_speed,
+        "date": get_env_value("TT_TRAVEL_DATE", date),
+        "start": get_env_value("TT_PRESERVE_START", default_start),
+        "end": get_env_value("TT_PRESERVE_END", default_end),
+        "need_food": resolve_toggle("TT_PRESERVE_NEED_FOOD"),
+        "need_assurance": resolve_toggle("TT_PRESERVE_NEED_ASSURANCE"),
+        "need_consign": resolve_toggle("TT_PRESERVE_NEED_CONSIGN"),
+    }
 
 
 def query_and_preserve(headers):
@@ -22,34 +52,38 @@ def query_and_preserve(headers):
     4. 买票
     :return:
     """
-    start = ""
-    end = ""
+    query = resolve_preserve_query()
+    start = query["start"]
+    end = query["end"]
+    query_date = query["date"]
     trip_ids = []
     PRESERVE_URL = ""
 
-    high_speed = random_boolean()
+    high_speed = query["high_speed"]
     if high_speed:
-        start = "Shang Hai"
-        end = "Su Zhou"
         high_speed_place_pair = (start, end)
-        trip_ids = _query_high_speed_ticket(place_pair=high_speed_place_pair, headers=headers, time=date)
+        trip_ids = _query_high_speed_ticket(place_pair=high_speed_place_pair, headers=headers, time=query_date)
         PRESERVE_URL = f"{base_address}/api/v1/preserveservice/preserve"
     else:
-        start = "Shang Hai"
-        end = "Nan Jing"
         other_place_pair = (start, end)
-        trip_ids = _query_normal_ticket(place_pair=other_place_pair, headers=headers, time=date)
+        trip_ids = _query_normal_ticket(place_pair=other_place_pair, headers=headers, time=query_date)
         PRESERVE_URL = f"{base_address}/api/v1/preserveotherservice/preserveOther"
 
     _ = _query_assurances(headers=headers)
     food_result = _query_food(headers=headers)
     contacts_result = _query_contacts(headers=headers)
+    if not trip_ids:
+        print("no trips returned for preserve")
+        return False
+    if not contacts_result:
+        print("no contacts returned for preserve")
+        return False
 
     base_preserve_payload = {
-        "accountId": uuid,
+        "accountId": get_current_uuid(),
         "assurance": "0",
         "contactsId": "",
-        "date": date,
+        "date": query_date,
         "from": start,
         "to": end,
         "tripId": ""
@@ -58,16 +92,19 @@ def query_and_preserve(headers):
     trip_id = random_form_list(trip_ids)
     base_preserve_payload["tripId"] = trip_id
 
-    need_food = random_boolean()
+    need_food = query["need_food"]
     if need_food:
         logger.info("need food")
+        if not food_result:
+            print("food requested but no food options returned")
+            return False
         food_dict = random_form_list(food_result)
         base_preserve_payload.update(food_dict)
     else:
         logger.info("not need food")
         base_preserve_payload["foodType"] = "0"
 
-    need_assurance = random_boolean()
+    need_assurance = query["need_assurance"]
     if need_assurance:
         base_preserve_payload["assurance"] = 1
 
@@ -78,13 +115,13 @@ def query_and_preserve(headers):
     seat_type = random_form_list(["2", "3"])
     base_preserve_payload["seatType"] = seat_type
 
-    need_consign = random_boolean()
+    need_consign = query["need_consign"]
     if need_consign:
         consign = {
             "consigneeName": random_str(),
             "consigneePhone": random_phone(),
             "consigneeWeight": random.randint(1, 10),
-            "handleDate": date
+            "handleDate": query_date
         }
         base_preserve_payload.update(consign)
 
@@ -92,25 +129,28 @@ def query_and_preserve(headers):
 
     print(f"choices: preserve_high: {high_speed} need_food:{need_food}  need_consign: {need_consign}  need_assurance:{need_assurance}")
 
-    res = requests.post(url=PRESERVE_URL,
-                        headers=headers,
-                        json=base_preserve_payload)
-
-    print(res.json())
-    if res.json()["data"] != "Success":
-        raise Exception(res.json() + " not success")
+    res = _request_with_retry(
+        "POST",
+        PRESERVE_URL,
+        headers=headers,
+        json=base_preserve_payload,
+        timeout=REQUEST_TIMEOUT,
+    )
+    body = _response_json(res)
+    print(body)
+    if res is None or res.status_code != 200 or body is None or body.get("data") != "Success":
+        print("preserve failed")
+        return False
+    return True
 
 
 if __name__ == '__main__':
-    headers = {
-        "Cookie": "JSESSIONID=823B2652E3F5B64A1C94C924A05D80AF; YsbCaptcha=2E037F4AB09D49FA9EE3BE4E737EAFD2",
-        "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmZHNlX21pY3Jvc2VydmljZSIsInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJpZCI6IjRkMmE0NmM3LTcxY2ItNGNmMS1iNWJiLWI2ODQwNmQ5ZGE2ZiIsImlhdCI6MTYyNzE5OTA0NCwiZXhwIjoxNjI3MjAyNjQ0fQ.3IIwwz7AwqHtOFDeXfih25i6_7nQBPL_K7BFxuyFiKQ",
-        "Content-Type": "application/json"
-    }
+    headers = build_user_headers()
+    iterations = get_iterations()
 
     start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    for i in range(1000):
+    for i in range(iterations):
         try:
             query_and_preserve(headers=headers)
             print("*****************************INDEX:" + str(i))

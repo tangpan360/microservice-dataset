@@ -1,15 +1,30 @@
-from atomic_queries import _query_high_speed_ticket, _query_normal_ticket
+from atomic_queries import _query_high_speed_ticket, _query_normal_ticket, build_user_headers, get_iterations, get_env_value
 from utils import random_boolean
 
 import logging
+import os
 import time
 
-logger = logging.getLogger("query_and_preserve")
-# The UUID of user fdse_microservice is that
-uuid = "4d2a46c7-71cb-4cf1-b5bb-b68406d9da6f"
+logger = logging.getLogger("query_travel_left")
 date = time.strftime("%Y-%m-%d", time.localtime())
 
-base_address = "http://139.196.152.44:31000"
+
+def resolve_query_mode() -> str:
+    mode = os.environ.get("TT_QUERY_MODE", "auto").strip().lower()
+    if mode in {"high_speed", "normal"}:
+        return mode
+    return "auto"
+
+
+def resolve_place_pair(high_speed: bool):
+    if high_speed:
+        default_start, default_end = "Shang Hai", "Su Zhou"
+    else:
+        default_start, default_end = "Shang Hai", "Nan Jing"
+    return (
+        get_env_value("TT_TRAVEL_START", default_start),
+        get_env_value("TT_TRAVEL_END", default_end),
+    )
 
 
 def query_travel_left(headers):
@@ -20,38 +35,28 @@ def query_travel_left(headers):
     4. 买票
     :return:
     """
-    start = ""
-    end = ""
-    trip_ids = []
-    PRESERVE_URL = ""
-
-    high_speed = False
+    mode = resolve_query_mode()
+    high_speed = random_boolean() if mode == "auto" else mode == "high_speed"
+    query_date = get_env_value("TT_TRAVEL_DATE", date)
+    place_pair = resolve_place_pair(high_speed)
     if high_speed:
-        start = "Shang Hai"
-        end = "Su Zhou"
-        high_speed_place_pair = (start, end)
-        trip_ids = _query_high_speed_ticket(place_pair=high_speed_place_pair, headers=headers, time=date)
+        trip_ids = _query_high_speed_ticket(place_pair=place_pair, headers=headers, time=query_date)
     else:
-        start = "Shang Hai"
-        end = "Nan Jing"
-        other_place_pair = (start, end)
-        trip_ids = _query_normal_ticket(place_pair=other_place_pair, headers=headers, time=date)
+        trip_ids = _query_normal_ticket(place_pair=place_pair, headers=headers, time=query_date)
+
+    query_type = "high_speed" if high_speed else "normal"
+    print(f"query_type: {query_type}, place_pair: {place_pair}, date: {query_date}, trip_ids: {trip_ids}")
+    return trip_ids
 
 
 if __name__ == '__main__':
-    cookie = "JSESSIONID=823B2652E3F5B64A1C94C924A05D80AF; YsbCaptcha=2E037F4AB09D49FA9EE3BE4E737EAFD2"
-    Authorization = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmZHNlX21pY3Jvc2VydmljZSIsInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJpZCI6IjRkMmE0NmM3LTcxY2ItNGNmMS1iNWJiLWI2ODQwNmQ5ZGE2ZiIsImlhdCI6MTYyODcwNjQ5NSwiZXhwIjoxNjI4NzEwMDk1fQ.1G93WmGzGG11uc9dY4AAuJxiGlmjl12UXSAngNwPSXk"
-    headers = {
-        'Connection': 'close',
-        "Cookie": f"{cookie}",
-        "Authorization": f"Bearer {Authorization}",
-        "Content-Type": "application/json"
-    }
+    headers = build_user_headers()
+    iterations = get_iterations()
 
     start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     print(f"start:{start_time}")
 
-    for i in range(30):
+    for i in range(iterations):
         try:
             query_travel_left(headers=headers)
             print("*****************************INDEX:" + str(i))

@@ -1,37 +1,40 @@
-from atomic_queries import _query_high_speed_ticket, _query_normal_ticket, _query_assurances, _query_food, \
-    _query_contacts
-from utils import random_boolean, random_phone, random_str, random_form_list
+from atomic_queries import _query_food, build_user_headers, get_iterations, get_env_value
 
 import logging
-import random
-import requests
 import time
 
-logger = logging.getLogger("query_and_preserve")
-# The UUID of user fdse_microservice is that
-uuid = "4d2a46c7-71cb-4cf1-b5bb-b68406d9da6f"
+logger = logging.getLogger("query_food")
 date = time.strftime("%Y-%m-%d", time.localtime())
 
-base_address = "http://139.196.152.44:31000"
+def resolve_food_query():
+    return {
+        "date": get_env_value("TT_TRAVEL_DATE", date),
+        "start": get_env_value("TT_FOOD_START", "Shang Hai"),
+        "end": get_env_value("TT_FOOD_END", "Su Zhou"),
+        "trip_id": get_env_value("TT_FOOD_TRIP_ID", "D1345"),
+    }
 
 
 def query_food(headers):
-    _query_food(headers=headers)
+    query = resolve_food_query()
+    food = _query_food(
+        place_pair=(query["start"], query["end"]),
+        train_num=query["trip_id"],
+        headers=headers,
+        date=query["date"],
+    )
+    print(f"food_query: {query}")
+    print(f"food_result: {food}")
+    return food
 
 
 if __name__ == '__main__':
-    cookie = "JSESSIONID=823B2652E3F5B64A1C94C924A05D80AF; YsbCaptcha=2E037F4AB09D49FA9EE3BE4E737EAFD2"
-    Authorization = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmZHNlX21pY3Jvc2VydmljZSIsInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJpZCI6IjRkMmE0NmM3LTcxY2ItNGNmMS1iNWJiLWI2ODQwNmQ5ZGE2ZiIsImlhdCI6MTYyODcwNTc0MiwiZXhwIjoxNjI4NzA5MzQyfQ.VHlvCNvaDW41rO55XNV1nniKotW6ip1TFfHaDqyDO3s"
-    headers = {
-        'Connection': 'close',
-        "Cookie": f"{cookie}",
-        "Authorization": f"Bearer {Authorization}",
-        "Content-Type": "application/json"
-    }
+    headers = build_user_headers()
+    iterations = get_iterations()
 
     start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    for i in range(320):
+    for i in range(iterations):
         try:
             query_food(headers=headers)
             print("*****************************INDEX:" + str(i))

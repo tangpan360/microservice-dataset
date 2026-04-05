@@ -385,38 +385,6 @@ kubectl -n monitoring get pods | grep -E 'ErrImagePull|ImagePullBackOff|Init:' |
 kubectl -n monitoring get events --sort-by=.lastTimestamp | tail -n 30
 ```
 
-如果这里看到 `alertmanager-monitoring-kube-prometheus-alertmanager-0` 或 `prometheus-monitoring-kube-prometheus-prometheus-0` 卡在 `Init:ImagePullBackOff`，并且 events 里出现下面这种错误：
-
-- `Failed to pull image "quay.io/prometheus-operator/prometheus-config-reloader:v0.89.0"`
-- `proxyconnect tcp: dial tcp 127.0.0.1:7890: connect: connection refused`
-
-说明缺的是 `prometheus-config-reloader` 这个镜像。直接执行下面这组补充处理命令：
-
-```bash
-IMG="quay.io/prometheus-operator/prometheus-config-reloader:v0.89.0"
-SRC="quay.m.daocloud.io/prometheus-operator/prometheus-config-reloader:v0.89.0"
-
-docker pull "$SRC"
-docker tag "$SRC" "$IMG"
-kind load docker-image "$IMG" --name tt
-
-kubectl -n monitoring delete pod \
-  alertmanager-monitoring-kube-prometheus-alertmanager-0 \
-  prometheus-monitoring-kube-prometheus-prometheus-0
-```
-
-然后再次检查：
-
-```bash
-kubectl -n monitoring get pods -o wide
-kubectl -n monitoring get events --sort-by=.lastTimestamp | tail -n 20
-```
-
-理想状态是：
-
-- `alertmanager-monitoring-kube-prometheus-alertmanager-0` 变成 `2/2 Running`
-- `prometheus-monitoring-kube-prometheus-prometheus-0` 变成 `2/2 Running`
-
 #### 6.4 让 Prometheus 抓取 Istio sidecar 指标
 
 这一步决定你后续是否能在 Prometheus 里查到 `istio_requests_total`、`istio_request_duration_*` 等 Istio 指标。

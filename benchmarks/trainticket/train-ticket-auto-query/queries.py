@@ -1,12 +1,33 @@
 from typing import List
+import os
 import requests
 import logging
 import time
 import random
-from .utils import *
+try:
+    from .utils import *
+except ImportError:
+    from utils import *
 
 logger = logging.getLogger("auto-queries")
 datestr = time.strftime("%Y-%m-%d", time.localtime())
+
+
+def get_env_value(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return value
+
+
+def get_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 class Query:
@@ -35,35 +56,47 @@ class Query:
         """
         url = f"{self.address}/api/v1/users/login"
 
-        headers = {
-            'Origin': url,
-            'Referer': f"{self.address}/client_login.html",
+        payload = {
+            "username": username,
+            "password": password,
+            # The auth service skips captcha validation when this is empty.
+            "verificationCode": "",
         }
 
-        data = '{"username":"' + username + '","password":"' + \
-            password + '","verificationCode":"1234"}'
+        retries = max(1, int(get_env_float("TT_LOGIN_RETRIES", 3)))
+        retry_sleep = get_env_float("TT_LOGIN_RETRY_SLEEP", 1.0)
+        timeout = get_env_float("TT_TIMEOUT", 20.0)
 
-        # 获取cookies
-        verify_url = self.address + '/api/v1/verifycode/generate'
-        r = self.session.get(url=verify_url)
-        r = self.session.post(url=url, headers=headers,
-                              data=data, verify=False)
+        last_error = "unknown login failure"
+        for attempt in range(retries):
+            try:
+                r = self.session.post(url=url, json=payload, verify=False, timeout=timeout)
+                if r.status_code == 200:
+                    body = r.json()
+                    data = body.get("data")
+                    if body.get("status") == 1 and data is not None:
+                        self.uid = data.get("userId")
+                        self.token = data.get("token")
+                        self.session.headers.update(
+                            {"Authorization": f"Bearer {self.token}"}
+                        )
+                        logger.info(f"login success, uid: {self.uid}")
+                        return True
+                    last_error = str(body)
+                else:
+                    last_error = f"status={r.status_code}, body={r.text}"
+            except requests.RequestException as exc:
+                last_error = str(exc)
 
-        if r.status_code == 200:
-            data = r.json().get("data")
-            self.uid = data.get("userId")
-            self.token = data.get("token")
-            self.session.headers.update(
-                {"Authorization": f"Bearer {self.token}"}
-            )
-            logger.info(f"login success, uid: {self.uid}")
-            return True
-        else:
-            logger.error("login failed")
-            return False
+            if attempt + 1 < retries:
+                logger.warning(f"login attempt {attempt + 1}/{retries} failed: {last_error}")
+                time.sleep(retry_sleep)
+
+        logger.error(f"login failed after {retries} attempts: {last_error}")
+        return False
 
     def admin_login(self):
-        return self.login
+        return self.login("admin", "222222")
 
     def query_high_speed_ticket(self, place_pair: tuple = (), time: str = "", headers: dict = {}) -> List[str]:
         """
@@ -203,7 +236,8 @@ class Query:
             "endPlace": place_pair[1],
         }
 
-        response = self.session.post(url=url, headers=headers, json=payload)
+        timeout = get_env_float("TT_ADVANCED_TIMEOUT", get_env_float("TT_TIMEOUT", 20.0))
+        response = self.session.post(url=url, headers=headers, json=payload, timeout=timeout)
 
         if response.status_code != 200 or response.json().get("data") is None:
             logger.warning(
@@ -231,8 +265,10 @@ class Query:
 
         return [{"assurance": "1"}]
 
-    def query_food(self, place_pair: tuple = ("Shang Hai", "Su Zhou"), train_num: str = "D1345", headers: dict = {}):
-        url = f"{self.address}/api/v1/foodservice/foods/2021-07-14/{place_pair[0]}/{place_pair[1]}/{train_num}"
+    def query_food(self, place_pair: tuple = ("Shang Hai", "Su Zhou"), train_num: str = "D1345", headers: dict = {}, date: str = ""):
+        if date == "":
+            date = datestr
+        url = f"{self.address}/api/v1/foodservice/foods/{date}/{place_pair[0]}/{place_pair[1]}/{train_num}"
 
         response = self.session.get(url=url, headers=headers)
         if response.status_code != 200 or response.json().get("data") is None:
@@ -289,10 +325,27 @@ class Query:
             "loginId": self.uid,
         }
 
-        response = self.session.post(url=url, headers=headers, json=payload)
-        if response.status_code != 200 or response.json().get("data") is None:
-            logger.warning(
-                f"query orders failed, response data is {response.text}")
+        retries = max(1, int(get_env_float("TT_ORDER_QUERY_RETRIES", 3)))
+        retry_sleep = get_env_float("TT_ORDER_QUERY_RETRY_SLEEP", 1.0)
+        timeout = get_env_float("TT_TIMEOUT", 20.0)
+        response = None
+        last_error = "unknown order query failure"
+        for attempt in range(retries):
+            try:
+                response = self.session.post(url=url, headers=headers, json=payload, timeout=timeout)
+                if response.status_code == 200 and response.json().get("data") is not None:
+                    break
+                last_error = response.text
+            except requests.RequestException as exc:
+                last_error = str(exc)
+                response = None
+
+            if attempt + 1 < retries:
+                logger.warning(f"query orders attempt {attempt + 1}/{retries} failed for {url}: {last_error}")
+                time.sleep(retry_sleep)
+
+        if response is None or response.status_code != 200 or response.json().get("data") is None:
+            logger.warning(f"query orders failed, response data is {last_error}")
             return None
 
         data = response.json().get("data")
@@ -329,10 +382,27 @@ class Query:
             "loginId": self.uid,
         }
 
-        response = self.session.post(url=url, headers=headers, json=payload)
-        if response.status_code != 200 or response.json().get("data") is None:
-            logger.warning(
-                f"query orders failed, response data is {response.text}")
+        retries = max(1, int(get_env_float("TT_ORDER_QUERY_RETRIES", 3)))
+        retry_sleep = get_env_float("TT_ORDER_QUERY_RETRY_SLEEP", 1.0)
+        timeout = get_env_float("TT_TIMEOUT", 20.0)
+        response = None
+        last_error = "unknown order query failure"
+        for attempt in range(retries):
+            try:
+                response = self.session.post(url=url, headers=headers, json=payload, timeout=timeout)
+                if response.status_code == 200 and response.json().get("data") is not None:
+                    break
+                last_error = response.text
+            except requests.RequestException as exc:
+                last_error = str(exc)
+                response = None
+
+            if attempt + 1 < retries:
+                logger.warning(f"query orders all info attempt {attempt + 1}/{retries} failed for {url}: {last_error}")
+                time.sleep(retry_sleep)
+
+        if response is None or response.status_code != 200 or response.json().get("data") is None:
+            logger.warning(f"query orders failed, response data is {last_error}")
             return None
 
         data = response.json().get("data")
@@ -360,14 +430,15 @@ class Query:
             "from": result["from"],
             "to": result["to"],
             "orderId": result["orderId"],
-            "consignee": "32",
-            "phone": "12345677654",
-            "weight": "32",
+            "consignee": get_env_value("TT_CONSIGN_CONSIGNEE", "consignee"),
+            "phone": get_env_value("TT_CONSIGN_PHONE", "12345677654"),
+            "weight": get_env_value("TT_CONSIGN_WEIGHT", "32"),
             "id": "",
             "isWithin": False
         }
         res = self.session.put(url=url, headers=headers,
-                               json=consignload)
+                               json=consignload,
+                               timeout=get_env_float("TT_TIMEOUT", 20.0))
 
         order_id = result["orderId"]
         if res.status_code == 200 or res.status_code == 201:
@@ -402,7 +473,7 @@ class Query:
             "tripId": trip_id
         }
 
-        res = self.session.post(url=url, headers=headers, json=payload)
+        res = self.session.post(url=url, headers=headers, json=payload, timeout=get_env_float("TT_TIMEOUT", 20.0))
 
         if res.status_code == 200:
             logger.info(f"order {order_id} pay success")
@@ -416,38 +487,39 @@ class Query:
     def cancel_order(self, order_id, headers: dict = {}):
         url = f"{self.address}/api/v1/cancelservice/cancel/{order_id}/{self.uid}"
 
-        res = self.session.get(url=url, headers=headers)
+        res = self.session.get(url=url, headers=headers, timeout=get_env_float("TT_TIMEOUT", 20.0))
 
         if res.status_code == 200:
             logger.info(f"order {order_id} cancel success")
+            return order_id
         else:
             logger.warning(
                 f"order {order_id} cancel failed, code: {res.status_code}, text: {res.text}")
-
-        return order_id
+            return None
 
     def collect_order(self, order_id, headers: dict = {}):
         url = f"{self.address}/api/v1/executeservice/execute/collected/{order_id}"
-        res = self.session.get(url=url, headers=headers)
+        res = self.session.get(url=url, headers=headers, timeout=get_env_float("TT_TIMEOUT", 20.0))
         if res.status_code == 200:
             logger.info(f"order {order_id} collect success")
+            return order_id
         else:
             logger.warning(
                 f"order {order_id} collect failed, code: {res.status_code}, text: {res.text}")
-
-        return order_id
+            return None
 
     def enter_station(self, order_id, headers: dict = {}):
         url = f"{self.address}/api/v1/executeservice/execute/execute/{order_id}"
         res = self.session.get(url=url,
-                               headers=headers)
+                               headers=headers,
+                               timeout=get_env_float("TT_TIMEOUT", 20.0))
         if res.status_code == 200:
             logger.info(f"order {order_id} enter station success")
+            return order_id
         else:
             logger.warning(
                 f"order {order_id} enter station failed, code: {res.status_code}, text: {res.text}")
-
-        return order_id
+            return None
 
     def query_cheapest(self, date="", headers: dict = {}):
         self.query_advanced_ticket(type="cheapest", date=date)
@@ -496,14 +568,21 @@ class Query:
             "seatType": new_seat_type
         }
         # print(payload)
-        r = self.session.post(url=url, json=payload, headers=headers)
-        if r.status_code == 200:
-            logger.info(r.text)
-        else:
+        r = self.session.post(url=url, json=payload, headers=headers, timeout=get_env_float("TT_TIMEOUT", 20.0))
+        if r.status_code != 200:
             logger.warning(
                 f"Request Failed: status code: {r.status_code}, {r.text}")
-
-        return
+            return None
+        try:
+            body = r.json()
+        except ValueError:
+            logger.warning(f"Request Failed: invalid json body: {r.text}")
+            return None
+        logger.info(r.text)
+        if body.get("status") != 1:
+            logger.warning(f"rebook business failed: {body}")
+            return None
+        return old_order_id
 
     def query_admin_travel(self, headers: dict = {}):
         url = f"{self.address}/api/v1/admintravelservice/admintravel"
@@ -535,6 +614,10 @@ class Query:
             "tripId": ""
         }
 
+        if not trip_ids:
+            logger.warning("preserve failed: no trips returned")
+            return False
+
         trip_id = random_from_list(trip_ids)
         base_preserve_payload["tripId"] = trip_id
 
@@ -542,6 +625,9 @@ class Query:
         if need_food:
             logger.info("need food")
             food_result = self.query_food()
+            if not food_result:
+                logger.warning("preserve failed: no food options returned")
+                return False
             food_dict = random_from_list(food_result)
             base_preserve_payload.update(food_dict)
         else:
@@ -553,6 +639,9 @@ class Query:
             base_preserve_payload["assurance"] = 1
 
         contacts_result = self.query_contacts()
+        if not contacts_result:
+            logger.warning("preserve failed: no contacts returned")
+            return False
         contacts_id = random_from_list(contacts_result)
         base_preserve_payload["contactsId"] = contacts_id
 
@@ -575,11 +664,13 @@ class Query:
 
         res = self.session.post(url=PRESERVE_URL,
                                 headers=headers,
-                                json=base_preserve_payload)
+                                json=base_preserve_payload,
+                                timeout=get_env_float("TT_TIMEOUT", 20.0))
 
         if res.status_code == 200 and res.json()["data"] == "Success":
             logger.info(f"preserve trip {trip_id} success")
+            return True
         else:
             logger.error(
                 f"preserve failed, code: {res.status_code}, {res.text}")
-        return
+            return False
