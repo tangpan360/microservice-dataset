@@ -590,10 +590,15 @@ spec:
         - name: DISABLE_PROFILER
           value: "1"
         readinessProbe:
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
           periodSeconds: 5
           grpc:
             port: 8080
         livenessProbe:
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
           periodSeconds: 5
           grpc:
             port: 8080
@@ -861,10 +866,15 @@ spec:
         ports:
         - containerPort: 8080
         readinessProbe:
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
           periodSeconds: 5
           grpc:
             port: 8080
         livenessProbe:
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 5
           periodSeconds: 5
           grpc:
             port: 8080
