@@ -14,7 +14,7 @@ TIMESTAMP_RE = re.compile(r"\[(\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{
 TIMESTAMP_FMT = "%d/%b/%Y:%H:%M:%S %z"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = Path("dataset/raw/ClarkNet-HTTP")
-DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP")
+DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_minute.csv")
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +83,29 @@ def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
     return counts, min_ts, max_ts, skipped_lines
 
 
+def merge_results(
+    results: list[tuple[Counter, datetime, datetime, int]],
+) -> tuple[Counter, datetime, datetime, int]:
+    merged_counts: Counter = Counter()
+    min_ts: datetime | None = None
+    max_ts: datetime | None = None
+    skipped_lines = 0
+
+    for counts, current_min_ts, current_max_ts, current_skipped_lines in results:
+        merged_counts.update(counts)
+        skipped_lines += current_skipped_lines
+
+        if min_ts is None or current_min_ts < min_ts:
+            min_ts = current_min_ts
+        if max_ts is None or current_max_ts > max_ts:
+            max_ts = current_max_ts
+
+    if min_ts is None or max_ts is None:
+        raise ValueError("No valid timestamps found in merged ClarkNet inputs")
+
+    return merged_counts, min_ts, max_ts, skipped_lines
+
+
 def write_series(output_path: Path, counts: Counter, min_ts: datetime, max_ts: datetime) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -96,14 +119,6 @@ def write_series(output_path: Path, counts: Counter, min_ts: datetime, max_ts: d
             current += timedelta(minutes=1)
 
 
-def build_output_path(input_file: Path, output_path: Path, is_input_dir: bool) -> Path:
-    if is_input_dir:
-        return output_path / f"{input_file.stem}_requests_per_minute.csv"
-    if output_path.suffix.lower() != ".csv":
-        return output_path / f"{input_file.stem}_requests_per_minute.csv"
-    return output_path
-
-
 def main() -> None:
     args = parse_args()
     input_path = resolve_project_path(args.input)
@@ -113,21 +128,21 @@ def main() -> None:
     if not input_files:
         raise FileNotFoundError(f"No ClarkNet log files found in {input_path}")
 
-    is_input_dir = input_path.is_dir()
-    for input_file in input_files:
-        current_output = build_output_path(input_file, output_path, is_input_dir)
-        counts, min_ts, max_ts, skipped_lines = extract_counts(input_file)
-        write_series(current_output, counts, min_ts, max_ts)
+    if output_path.suffix.lower() != ".csv":
+        raise ValueError("output must be a .csv file path")
 
-        span_minutes = int((max_ts - min_ts).total_seconds() // 60) + 1
-        print(f"input={input_file}")
-        print(f"output={current_output}")
-        print(f"start={min_ts.isoformat()}")
-        print(f"end={max_ts.isoformat()}")
-        print(f"minutes={span_minutes}")
-        print(f"nonzero_minutes={len(counts)}")
-        print(f"skipped_lines={skipped_lines}")
-        print("-")
+    results = [extract_counts(input_file) for input_file in input_files]
+    counts, min_ts, max_ts, skipped_lines = merge_results(results)
+    write_series(output_path, counts, min_ts, max_ts)
+
+    span_minutes = int((max_ts - min_ts).total_seconds() // 60) + 1
+    print(f"input={input_path}")
+    print(f"output={output_path}")
+    print(f"start={min_ts.isoformat()}")
+    print(f"end={max_ts.isoformat()}")
+    print(f"minutes={span_minutes}")
+    print(f"nonzero_minutes={len(counts)}")
+    print(f"skipped_lines={skipped_lines}")
 
 
 if __name__ == "__main__":

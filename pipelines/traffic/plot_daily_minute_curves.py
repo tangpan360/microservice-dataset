@@ -15,6 +15,10 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = Path("dataset/processed/traffic")
 DEFAULT_OUTPUT = Path("analysis")
+DATASET_ALIASES = {
+    "clarknet": "ClarkNet-HTTP",
+    "nasa": "NASA-HTTP",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,15 +26,20 @@ def parse_args() -> argparse.Namespace:
         description="Plot per-day minute curves from processed traffic CSV files."
     )
     parser.add_argument(
+        "--data",
+        dest="dataset_name",
+        help="Optional dataset name under dataset/processed/traffic, e.g. clarknet.",
+    )
+    parser.add_argument(
         "--input",
         type=Path,
-        default=DEFAULT_INPUT,
+        default=None,
         help="Path to a processed traffic CSV file or a directory containing CSV files.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_OUTPUT,
+        default=None,
         help="Path to an output image file or directory.",
     )
     parser.add_argument(
@@ -44,6 +53,22 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def resolve_dataset_name(name: str) -> str:
+    return DATASET_ALIASES.get(name.lower(), name)
+
+
+def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    if args.dataset_name is not None:
+        dataset_dir = Path("dataset/processed/traffic") / resolve_dataset_name(args.dataset_name)
+        input_path = resolve_project_path(args.input or dataset_dir)
+        output_path = resolve_project_path(args.output or dataset_dir)
+        return input_path, output_path
+
+    input_path = resolve_project_path(args.input or DEFAULT_INPUT)
+    output_path = resolve_project_path(args.output or DEFAULT_OUTPUT)
+    return input_path, output_path
 
 
 def iter_input_files(input_path: Path) -> list[Path]:
@@ -121,8 +146,7 @@ def plot_daily_curves(input_path: Path, output_path: Path, max_days: int) -> Non
 
 def main() -> None:
     args = parse_args()
-    input_path = resolve_project_path(args.input)
-    output_path = resolve_project_path(args.output)
+    input_path, output_path = resolve_paths(args)
     input_files = iter_input_files(input_path)
 
     if not input_files:

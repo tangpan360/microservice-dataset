@@ -6,15 +6,17 @@ import argparse
 import csv
 import re
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
 TIMESTAMP_RE = re.compile(r"\[(\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
 TIMESTAMP_FMT = "%d/%b/%Y:%H:%M:%S %z"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT = Path("dataset/raw/NASA-HTTP")
-DEFAULT_OUTPUT = Path("dataset/processed/traffic/NASA-HTTP")
+DEFAULT_INPUT = Path("dataset/raw/NASA-HTTP/NASA_access_log_Aug95")
+DEFAULT_OUTPUT = Path("dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_minute.csv")
+DEFAULT_START_DATE = "1995-08-07"
+DEFAULT_END_DATE = "1995-08-20"
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,13 +27,23 @@ def parse_args() -> argparse.Namespace:
         "--input",
         type=Path,
         default=DEFAULT_INPUT,
-        help="Path to a NASA log file or directory, relative to the project root by default.",
+        help="Path to a NASA log file, relative to the project root by default.",
     )
     parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="Path to an output CSV file or directory, relative to the project root by default.",
+        help="Path to an output CSV file, relative to the project root by default.",
+    )
+    parser.add_argument(
+        "--start-date",
+        default=DEFAULT_START_DATE,
+        help="Inclusive start date in YYYY-MM-DD format.",
+    )
+    parser.add_argument(
+        "--end-date",
+        default=DEFAULT_END_DATE,
+        help="Inclusive end date in YYYY-MM-DD format.",
     )
     return parser.parse_args()
 
@@ -40,17 +52,11 @@ def resolve_project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def natural_sort_key(path: Path) -> list[int | str]:
-    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", path.name)]
+def parse_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def iter_input_files(input_path: Path) -> list[Path]:
-    if input_path.is_file():
-        return [input_path]
-    return sorted(input_path.glob("NASA_access_log_*"), key=natural_sort_key)
-
-
-def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
+def extract_counts(input_path: Path, start_date: date, end_date: date) -> tuple[Counter, datetime, datetime, int]:
     counts: Counter = Counter()
     min_ts: datetime | None = None
     max_ts: datetime | None = None
@@ -69,6 +75,10 @@ def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
                 skipped_lines += 1
                 continue
 
+            current_date = ts.date()
+            if current_date < start_date or current_date > end_date:
+                continue
+
             minute_ts = ts.replace(second=0, microsecond=0)
             counts[minute_ts] += 1
 
@@ -78,7 +88,7 @@ def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
                 max_ts = minute_ts
 
     if min_ts is None or max_ts is None:
-        raise ValueError(f"No valid timestamps found in {input_path}")
+        raise ValueError(f"No valid timestamps found in {input_path} for {start_date} to {end_date}")
 
     return counts, min_ts, max_ts, skipped_lines
 
@@ -95,39 +105,27 @@ def write_series(output_path: Path, counts: Counter, min_ts: datetime, max_ts: d
             writer.writerow([current.isoformat(), counts.get(current, 0)])
             current += timedelta(minutes=1)
 
-
-def build_output_path(input_file: Path, output_path: Path, is_input_dir: bool) -> Path:
-    if is_input_dir:
-        return output_path / f"{input_file.stem}_requests_per_minute.csv"
-    if output_path.suffix.lower() != ".csv":
-        return output_path / f"{input_file.stem}_requests_per_minute.csv"
-    return output_path
-
-
 def main() -> None:
     args = parse_args()
     input_path = resolve_project_path(args.input)
     output_path = resolve_project_path(args.output)
-    input_files = iter_input_files(input_path)
+    start_date = parse_date(args.start_date)
+    end_date = parse_date(args.end_date)
 
-    if not input_files:
-        raise FileNotFoundError(f"No NASA log files found in {input_path}")
+    if end_date < start_date:
+        raise ValueError("end-date must be greater than or equal to start-date")
 
-    is_input_dir = input_path.is_dir()
-    for input_file in input_files:
-        current_output = build_output_path(input_file, output_path, is_input_dir)
-        counts, min_ts, max_ts, skipped_lines = extract_counts(input_file)
-        write_series(current_output, counts, min_ts, max_ts)
+    counts, min_ts, max_ts, skipped_lines = extract_counts(input_path, start_date, end_date)
+    write_series(output_path, counts, min_ts, max_ts)
 
-        span_minutes = int((max_ts - min_ts).total_seconds() // 60) + 1
-        print(f"input={input_file}")
-        print(f"output={current_output}")
-        print(f"start={min_ts.isoformat()}")
-        print(f"end={max_ts.isoformat()}")
-        print(f"minutes={span_minutes}")
-        print(f"nonzero_minutes={len(counts)}")
-        print(f"skipped_lines={skipped_lines}")
-        print("-")
+    span_minutes = int((max_ts - min_ts).total_seconds() // 60) + 1
+    print(f"input={input_path}")
+    print(f"output={output_path}")
+    print(f"start={min_ts.isoformat()}")
+    print(f"end={max_ts.isoformat()}")
+    print(f"minutes={span_minutes}")
+    print(f"nonzero_minutes={len(counts)}")
+    print(f"skipped_lines={skipped_lines}")
 
 
 if __name__ == "__main__":
