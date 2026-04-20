@@ -1,6 +1,6 @@
 # Traffic Pipelines
 
-整理流量数据集的下载、解压与分钟级提取方式。
+整理流量数据集的下载、解压与秒级提取方式。
 
 ## NASA-HTTP
 
@@ -27,16 +27,16 @@ gunzip NASA_access_log_Aug95.gz
 
 ### 提取
 
-默认提取 `NASA_access_log_Aug95` 中 `1995-08-07` 到 `1995-08-20` 这 `14` 天的数据：
+默认提取 `NASA_access_log_Aug95` 中 `1995-08-07` 到 `1995-08-20` 这 `14` 天的秒级数据：
 
 ```bash
 cd pipelines/traffic
-python extract_nasa_requests_per_minute.py
+python extract_nasa_requests.py
 ```
 
 默认输出文件：
 
-- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_minute.csv`
+- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv`
 
 ### 可视化
 
@@ -82,16 +82,16 @@ gunzip clarknet_access_log_Sep4.gz
 
 ### 提取
 
-默认提取整个目录并合并成一个两周的 CSV：
+默认提取整个目录并合并成一个两周的秒级 CSV：
 
 ```bash
 cd pipelines/traffic
-python extract_clarknet_requests_per_minute.py
+python extract_clarknet_requests.py
 ```
 
 默认输出文件：
 
-- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_minute.csv`
+- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv`
 
 ### 可视化
 

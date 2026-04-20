@@ -23,7 +23,7 @@ DATASET_ALIASES = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Plot per-day minute curves from processed traffic CSV files."
+        description="Plot per-day minute curves from processed traffic CSV files by aggregating rows into minute bins."
     )
     parser.add_argument(
         "--data",
@@ -86,7 +86,7 @@ def load_daily_series(input_path: Path, max_days: int) -> tuple[list[str], list[
             ts = datetime.fromisoformat(row["timestamp"])
             day = ts.date().isoformat()
             minute_of_day = ts.hour * 60 + ts.minute
-            days[day][minute_of_day] = int(row["request_count"])
+            days[day][minute_of_day] += int(row["request_count"])
 
     ordered_days = sorted(days)
     if max_days > 0:
@@ -96,7 +96,9 @@ def load_daily_series(input_path: Path, max_days: int) -> tuple[list[str], list[
 
 
 def build_output_path(input_file: Path, output_path: Path, is_input_dir: bool) -> Path:
-    stem = input_file.stem.replace("_requests_per_minute", "")
+    stem = input_file.stem
+    stem = stem.replace("_requests_per_second", "")
+    stem = stem.replace("_requests_per_minute", "")
     filename = f"{stem}_daily_minute_curves.png"
     if is_input_dir:
         return output_path / filename

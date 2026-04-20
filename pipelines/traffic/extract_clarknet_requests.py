@@ -14,12 +14,12 @@ TIMESTAMP_RE = re.compile(r"\[(\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{
 TIMESTAMP_FMT = "%d/%b/%Y:%H:%M:%S %z"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = Path("dataset/raw/ClarkNet-HTTP")
-DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_minute.csv")
+DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract continuous per-minute request count series from ClarkNet HTTP access logs."
+        description="Extract continuous per-second request count series from ClarkNet HTTP access logs."
     )
     parser.add_argument(
         "--input",
@@ -69,13 +69,13 @@ def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
                 skipped_lines += 1
                 continue
 
-            minute_ts = ts.replace(second=0, microsecond=0)
-            counts[minute_ts] += 1
+            second_ts = ts.replace(microsecond=0)
+            counts[second_ts] += 1
 
-            if min_ts is None or minute_ts < min_ts:
-                min_ts = minute_ts
-            if max_ts is None or minute_ts > max_ts:
-                max_ts = minute_ts
+            if min_ts is None or second_ts < min_ts:
+                min_ts = second_ts
+            if max_ts is None or second_ts > max_ts:
+                max_ts = second_ts
 
     if min_ts is None or max_ts is None:
         raise ValueError(f"No valid timestamps found in {input_path}")
@@ -116,7 +116,7 @@ def write_series(output_path: Path, counts: Counter, min_ts: datetime, max_ts: d
 
         while current <= max_ts:
             writer.writerow([current.isoformat(), counts.get(current, 0)])
-            current += timedelta(minutes=1)
+            current += timedelta(seconds=1)
 
 
 def main() -> None:
@@ -135,13 +135,13 @@ def main() -> None:
     counts, min_ts, max_ts, skipped_lines = merge_results(results)
     write_series(output_path, counts, min_ts, max_ts)
 
-    span_minutes = int((max_ts - min_ts).total_seconds() // 60) + 1
+    span_seconds = int((max_ts - min_ts).total_seconds()) + 1
     print(f"input={input_path}")
     print(f"output={output_path}")
     print(f"start={min_ts.isoformat()}")
     print(f"end={max_ts.isoformat()}")
-    print(f"minutes={span_minutes}")
-    print(f"nonzero_minutes={len(counts)}")
+    print(f"seconds={span_seconds}")
+    print(f"nonzero_seconds={len(counts)}")
     print(f"skipped_lines={skipped_lines}")
 
 
