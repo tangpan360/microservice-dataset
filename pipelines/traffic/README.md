@@ -109,3 +109,48 @@ python plot_daily_minute_curves.py --data clarknet
 并把图片输出到同一个目录：
 
 - `dataset/processed/traffic/ClarkNet-HTTP`
+
+## 生成 Locust 10s 注入 schedule
+
+把已经提取好的**秒级**流量 CSV（`timestamp,request_count`）转换成 Locust 可直接使用的 **10s 注入 schedule**。
+
+### 运行
+
+前置条件：你已经跑完上面的提取步骤，得到两份秒级 CSV：
+
+- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv`
+- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv`
+
+生成 schedule：
+
+```bash
+cd pipelines/traffic
+
+# 默认生成 clarknet + nasa 两份 schedule
+python build_users_schedule_10s.py
+
+# 或者只生成一个数据集
+python build_users_schedule_10s.py --data clarknet
+python build_users_schedule_10s.py --data nasa
+```
+
+### 输出
+
+默认输出到 `microservice-dataset/runs/traffic_schedules/`（相对于 `microservice-dataset/` 根目录为 `runs/traffic_schedules/`）：
+
+- `clarknet_users_10s_p99_1m_u2000.csv`
+- `nasa_users_10s_p99_1m_u2000.csv`
+
+输出的 `*_users_10s_*.csv` 是 Online Boutique 分布式 Locust 的动态注入输入文件。
+
+使用示例：
+
+```bash
+# 在 microservice-dataset 根目录运行
+SCHED="runs/traffic_schedules/clarknet_users_10s_p99_1m_u2000.csv"
+export OB_RUN_ID="clarknet-$(date +%Y%m%d_%H%M%S)"
+export OB_PROFILE="day_normal"
+export OB_SCENARIO_ID="clarknet-p99_1m-u2000-step10s"
+
+bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 30m --web-port 0
+```

@@ -32,3 +32,18 @@ tmp-*/
 Thumbs.db
 .vscode/
 .idea/
+
+# Dataset repo outputs
+analysis/
+runs/
+
+# Local persistent volumes (kind PVC data)
+.local/
+
+# Large datasets and generated data
+dataset/raw/
+dataset/processed/
+
+paper/
+tools/
+# docs/

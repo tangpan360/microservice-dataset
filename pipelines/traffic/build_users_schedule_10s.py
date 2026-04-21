@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+
+import argparse
+import csv
+import json
+from datetime import datetime
+from pathlib import Path
+
+
+def percentile(sorted_vals: list[float], q: float) -> float:
+    if not sorted_vals:
+        raise ValueError("empty values")
+    if q <= 0:
+        return float(sorted_vals[0])
+    if q >= 1:
+        return float(sorted_vals[-1])
+    k = (len(sorted_vals) - 1) * q
+    f = int(k)
+    c = min(f + 1, len(sorted_vals) - 1)
+    if c == f:
+        return float(sorted_vals[f])
+    d = k - f
+    return float(sorted_vals[f] * (1 - d) + sorted_vals[c] * d)
+
+
+def load_counts(input_csv: Path, *, step_s: int) -> tuple[dict[int, int], list[float]]:
+    if step_s <= 0:
+        raise ValueError("step_s must be positive")
+
+    start_ts: datetime | None = None
+    step_counts: dict[int, int] = {}
+    minute_counts: dict[int, int] = {}
+
+    with input_csv.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            ts = datetime.fromisoformat(row["timestamp"])
+            count = int(row["request_count"])
+            if start_ts is None:
+                start_ts = ts
+            elapsed = int((ts - start_ts).total_seconds())
+            step_bucket = (elapsed // step_s) * step_s
+            minute_bucket = (elapsed // 60) * 60
+            step_counts[step_bucket] = step_counts.get(step_bucket, 0) + count
+            minute_counts[minute_bucket] = minute_counts.get(minute_bucket, 0) + count
+
+    if start_ts is None:
+        raise ValueError(f"No rows in {input_csv}")
+
+    minute_avg_rps_sorted = sorted([v / 60.0 for v in minute_counts.values()])
+    return step_counts, minute_avg_rps_sorted
+
+
+def build_one(
+    *,
+    input_csv: Path,
+    out_csv: Path,
+    meta_out: Path | None,
+    step_s: int,
+    p99_users: int,
+    anchor_quantile: float,
+) -> dict:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    if meta_out is not None:
+        meta_out.parent.mkdir(parents=True, exist_ok=True)
+
+    step_counts, minute_avg_rps_sorted = load_counts(input_csv, step_s=step_s)
+    anchor = percentile(minute_avg_rps_sorted, anchor_quantile)
+    if anchor <= 0:
+        raise ValueError(f"Non-positive anchor rps: {anchor}")
+
+    max_step = max(step_counts.keys()) if step_counts else 0
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t_s", "users", "req_count", "rps_avg"])
+        for t_s in range(0, max_step + 1, step_s):
+            req_count = step_counts.get(t_s, 0)
+            rps = req_count / float(step_s)
+            users = int(round(p99_users * (rps / anchor)))
+            if users < 0:
+                users = 0
+            w.writerow([t_s, users, req_count, f"{rps:.6f}"])
+
+    meta = {
+        "input": str(input_csv),
+        "out": str(out_csv),
+        "step_s": step_s,
+        "p99_users": p99_users,
+        "anchor": {
+            "type": "p99_1m_avg_rps",
+            "quantile": anchor_quantile,
+            "value": anchor,
+        },
+    }
+
+    if meta_out is not None:
+        meta["minute_avg_rps"] = {
+            "count": len(minute_avg_rps_sorted),
+            "p50": percentile(minute_avg_rps_sorted, 0.50),
+            "p90": percentile(minute_avg_rps_sorted, 0.90),
+            "p95": percentile(minute_avg_rps_sorted, 0.95),
+            "p99": percentile(minute_avg_rps_sorted, 0.99),
+            "max": minute_avg_rps_sorted[-1],
+        }
+        meta_out.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return meta
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(
+        description="Build 10s Locust users schedules from extracted per-second CSVs."
+    )
+    p.add_argument(
+        "--data",
+        default="all",
+        choices=["all", "clarknet", "nasa"],
+        help="Dataset name (default: all).",
+    )
+    p.add_argument("--step-s", type=int, default=10, help="Step seconds for schedule (default: 10).")
+    p.add_argument(
+        "--p99-users",
+        type=int,
+        default=2000,
+        help="Users when traffic reaches the P99_1m anchor (default: 2000).",
+    )
+    # Backward-compat alias (deprecated): cap used to be both anchor users and an upper bound.
+    p.add_argument("--cap", type=int, dest="p99_users", help=argparse.SUPPRESS)
+    p.add_argument("--anchor-quantile", type=float, default=0.99, help="Anchor quantile on 1m avg RPS.")
+    p.add_argument(
+        "--out-dir",
+        default="",
+        help="Output directory (default: runs/traffic_schedules).",
+    )
+    p.add_argument(
+        "--no-meta",
+        action="store_true",
+        help="Do not write meta JSON (faster, less verbose).",
+    )
+    args = p.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    step_s = int(args.step_s)
+    p99_users = int(args.p99_users)
+    anchor_quantile = float(args.anchor_quantile)
+
+    out_dir = Path(args.out_dir) if args.out_dir else (repo_root / "runs" / "traffic_schedules")
+    meta_enabled = not bool(args.no_meta)
+
+    datasets = {
+        "clarknet": {
+            "input": repo_root
+            / "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv",
+            "schedule": out_dir / f"clarknet_users_10s_p99_1m_u{p99_users}.csv",
+            "meta": out_dir / f"clarknet_meta_p99_1m_u{p99_users}.json",
+        },
+        "nasa": {
+            "input": repo_root
+            / "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv",
+            "schedule": out_dir / f"nasa_users_10s_p99_1m_u{p99_users}.csv",
+            "meta": out_dir / f"nasa_meta_p99_1m_u{p99_users}.json",
+        },
+    }
+
+    targets = ["clarknet", "nasa"] if args.data == "all" else [args.data]
+
+    for name in targets:
+        conf = datasets[name]
+        input_csv: Path = conf["input"]
+        out_csv: Path = conf["schedule"]
+        meta_out: Path | None = conf["meta"] if meta_enabled else None
+
+        meta = build_one(
+            input_csv=input_csv,
+            out_csv=out_csv,
+            meta_out=meta_out,
+            step_s=step_s,
+            p99_users=p99_users,
+            anchor_quantile=anchor_quantile,
+        )
+
+        print(f"[{name}] input : {input_csv}")
+        print(f"[{name}] output: {out_csv}")
+        if meta_out is not None:
+            print(f"[{name}] meta  : {meta_out}")
+        print(
+            f"[{name}] anchor: {meta['anchor']['type']} q={meta['anchor']['quantile']} value={meta['anchor']['value']:.6f}"
+        )
+        print(f"[{name}] next  : bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh \"{out_csv}\" 16 30m --web-port 0")
+        print()
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
