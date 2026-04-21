@@ -7,5 +7,14 @@ containerdConfigPatches:
     endpoint = ["https://docker.m.daocloud.io", "https://docker.1ms.run"]
 nodes:
 - role: control-plane
+  extraMounts:
+  - hostPath: /data/tp/004-workload_prediction/microservice-dataset/.local/kind-ob-volumes
+    containerPath: /var/local-path-provisioner
 - role: worker
+  extraMounts:
+  - hostPath: /data/tp/004-workload_prediction/microservice-dataset/.local/kind-ob-volumes
+    containerPath: /var/local-path-provisioner
 - role: worker
+  extraMounts:
+  - hostPath: /data/tp/004-workload_prediction/microservice-dataset/.local/kind-ob-volumes
+    containerPath: /var/local-path-provisioner
