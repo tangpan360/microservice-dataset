@@ -41,7 +41,8 @@ WORKDIR /loadgen
 COPY --from=builder /install /usr/local
 
 # Add application code.
-COPY locustfile.py .
+# Minimal schedule-driven locustfile.
+COPY benchmarks/online_boutique/loadgen-locust/locustfile.py ./locustfile.py
 
 # enable gevent support in debugger
 ENV GEVENT_SUPPORT=True
