@@ -47,7 +47,14 @@ def natural_sort_key(path: Path) -> list[int | str]:
 def iter_input_files(input_path: Path) -> list[Path]:
     if input_path.is_file():
         return [input_path]
-    return sorted(input_path.glob("clarknet_access_log_*"), key=natural_sort_key)
+    return sorted(
+        [
+            path
+            for path in input_path.glob("clarknet_access_log_*")
+            if path.is_file() and path.suffix.lower() != ".gz"
+        ],
+        key=natural_sort_key,
+    )
 
 
 def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:

@@ -136,21 +136,9 @@ python build_users_schedule_10s.py --data nasa
 
 ### 输出
 
-默认输出到 `microservice-dataset/runs/traffic_schedules/`（相对于 `microservice-dataset/` 根目录为 `runs/traffic_schedules/`）：
+默认输出到各自数据集目录下的 `schedules/`：
 
-- `clarknet_users_10s_p99_1m_u2000.csv`
-- `nasa_users_10s_p99_1m_u2000.csv`
+- `dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_p99_1m_u2000.csv`
+- `dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_p99_1m_u2000.csv`
 
 输出的 `*_users_10s_*.csv` 是 Online Boutique 分布式 Locust 的动态注入输入文件。
-
-使用示例：
-
-```bash
-# 在 microservice-dataset 根目录运行
-SCHED="runs/traffic_schedules/clarknet_users_10s_p99_1m_u2000.csv"
-export OB_RUN_ID="clarknet-$(date +%Y%m%d_%H%M%S)"
-export OB_PROFILE="day_normal"
-export OB_SCENARIO_ID="clarknet-p99_1m-u2000-step10s"
-
-bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 30m --web-port 0
-```

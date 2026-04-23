@@ -7,6 +7,10 @@ from datetime import datetime
 from pathlib import Path
 
 
+def default_schedule_dir(repo_root: Path, dataset_dir_name: str) -> Path:
+    return repo_root / "dataset" / "processed" / "traffic" / dataset_dir_name / "schedules"
+
+
 def percentile(sorted_vals: list[float], q: float) -> float:
     if not sorted_vals:
         raise ValueError("empty values")
@@ -130,7 +134,7 @@ def main() -> int:
     p.add_argument(
         "--out-dir",
         default="",
-        help="Output directory (default: runs/traffic_schedules).",
+        help="Output directory. Default: dataset/processed/traffic/<dataset>/schedules.",
     )
     p.add_argument(
         "--no-meta",
@@ -144,21 +148,25 @@ def main() -> int:
     p99_users = int(args.p99_users)
     anchor_quantile = float(args.anchor_quantile)
 
-    out_dir = Path(args.out_dir) if args.out_dir else (repo_root / "runs" / "traffic_schedules")
+    out_dir = Path(args.out_dir) if args.out_dir else None
     meta_enabled = not bool(args.no_meta)
 
     datasets = {
         "clarknet": {
             "input": repo_root
             / "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv",
-            "schedule": out_dir / f"clarknet_users_10s_p99_1m_u{p99_users}.csv",
-            "meta": out_dir / f"clarknet_meta_p99_1m_u{p99_users}.json",
+            "schedule": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
+            / f"clarknet_users_10s_p99_1m_u{p99_users}.csv",
+            "meta": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
+            / f"clarknet_meta_p99_1m_u{p99_users}.json",
         },
         "nasa": {
             "input": repo_root
             / "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv",
-            "schedule": out_dir / f"nasa_users_10s_p99_1m_u{p99_users}.csv",
-            "meta": out_dir / f"nasa_meta_p99_1m_u{p99_users}.json",
+            "schedule": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))
+            / f"nasa_users_10s_p99_1m_u{p99_users}.csv",
+            "meta": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))
+            / f"nasa_meta_p99_1m_u{p99_users}.json",
         },
     }
 
