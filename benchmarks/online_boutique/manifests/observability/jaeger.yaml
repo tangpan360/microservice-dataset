@@ -31,6 +31,8 @@ spec:
           containerPort: 16686
         - name: otlp-grpc
           containerPort: 4317
+        - name: admin
+          containerPort: 14269
         volumeMounts:
         - name: badger
           mountPath: /badger

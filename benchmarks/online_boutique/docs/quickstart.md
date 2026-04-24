@@ -59,7 +59,7 @@ kubectl delete ns ob --wait=true || true
 sed -n '1,120p' benchmarks/online_boutique/kind-config.yaml
 ```
 
-`kind-config.yaml` 是 kind 集群的配置文件，用于声明节点数量/角色、挂载目录（`extraMounts`）以及镜像站等创建参数，保证环境可复现。
+`kind-config.yaml` 是 kind 集群的配置文件，用于声明节点数量/角色、挂载目录（`extraMounts`）、宿主机端口映射（`extraPortMappings`）以及镜像站等创建参数，保证环境可复现。
 
 由于 `kind-config.yaml` 使用了 `extraMounts` 将宿主机目录“映射/挂载”到 kind 的节点容器内部（节点在 kind 里其实是 Docker 容器），创建集群前请先确保宿主机目录存在。这里的 `.local/kind-ob-volumes` 主要用于提供 kind 集群里的本地持久化卷目录（例如 local-path-provisioner 使用的 PV 数据）。
 
@@ -226,10 +226,11 @@ kubectl -n monitoring get pods
 kubectl -n monitoring get pods -w
 ```
 
-让 Prometheus 抓取 Istio sidecar 指标：
+让 Prometheus 抓取 Istio sidecar 和 Jaeger 指标：
 
 ```bash
 kubectl apply -f benchmarks/online_boutique/manifests/monitoring/istio-proxy-podmonitor.yaml
+kubectl apply -f benchmarks/online_boutique/manifests/monitoring/jaeger-podmonitor.yaml
 ```
 
 确认 `PodMonitor` 已创建：
@@ -370,19 +371,20 @@ http://localhost:18080
 
 如果页面能打开，说明应用部署成功。
 
-为后续的 **Locust 注入** 准备入口，本文采用下面这组 **Istio 入口**（`18081`）。`18080` 仅用于验证页面可用。
+为后续的 **Locust 注入** 准备入口，本文采用固定的 **Istio 入口**（宿主机 `18081`）。`18080` 仅用于验证页面可用。
 
 ```bash
 kubectl -n ob apply -f benchmarks/online_boutique/microservices-demo/istio-manifests/frontend-gateway.yaml
 ```
 
-在**单独终端**里启动端口转发：
+把 `istio-ingressgateway` 的 HTTP nodePort 固定成 `30081`：
 
 ```bash
-kubectl -n istio-system port-forward svc/istio-ingressgateway 18081:80
+kubectl -n istio-system patch svc istio-ingressgateway --type='json' \
+  -p='[{"op":"replace","path":"/spec/ports/1/nodePort","value":30081}]'
 ```
 
-然后把浏览器或 Locust 的入口改成：
+由于 `kind-config.yaml` 已把宿主机 `18081` 映射到 kind 节点的 `30081`，这里不再需要 `kubectl port-forward`。然后把浏览器或 Locust 的入口改成：
 
 ```text
 http://localhost:18081
@@ -391,7 +393,7 @@ http://localhost:18081
 这个链路是：
 
 ```text
-Locust / 浏览器 -> istio-ingressgateway -> frontend Service -> 多个 frontend Pod
+Locust / 浏览器 -> localhost:18081 -> kind:30081 -> istio-ingressgateway -> frontend Service -> 多个 frontend Pod
 ```
 
 ---

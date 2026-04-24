@@ -10,6 +10,10 @@ nodes:
   extraMounts:
   - hostPath: /data/tp/004-workload_prediction/microservice-dataset/.local/kind-ob-volumes
     containerPath: /var/local-path-provisioner
+  extraPortMappings:
+  - containerPort: 30081
+    hostPort: 18081
+    protocol: TCP
 - role: worker
   extraMounts:
   - hostPath: /data/tp/004-workload_prediction/microservice-dataset/.local/kind-ob-volumes
