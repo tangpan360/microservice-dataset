@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import random
+from datetime import datetime, timezone
 from pathlib import Path
 
 from locust import FastHttpUser, LoadTestShape, between, events, task
@@ -20,6 +21,45 @@ PRODUCTS = [
 
 RUN_ID = os.getenv("OB_RUN_ID", "unknown")
 SCENARIO_ID = os.getenv("OB_SCENARIO_ID", "ob-traffic-schedule")
+INJECTION_EVENTS_FILE = os.getenv("OB_INJECTION_EVENTS_FILE", "")
+RUN_MANIFEST_PATH = os.getenv("OB_RUN_MANIFEST_PATH", "")
+
+
+def now_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def is_master_runner(environment) -> bool:
+    runner = getattr(environment, "runner", None)
+    return runner is not None and runner.__class__.__name__ == "MasterRunner"
+
+
+def append_injection_event(event_name: str, **extra) -> None:
+    if not INJECTION_EVENTS_FILE:
+        return
+    payload = {
+        "event": event_name,
+        "utc": now_utc(),
+        "run_id": RUN_ID,
+        "scenario_id": SCENARIO_ID,
+    }
+    payload.update(extra)
+    path = Path(INJECTION_EVENTS_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def update_run_manifest(**updates) -> None:
+    if not RUN_MANIFEST_PATH:
+        return
+    path = Path(RUN_MANIFEST_PATH)
+    manifest = {}
+    if path.exists():
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest.update(updates)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def load_users_schedule_csv(path: str) -> tuple[int, list[int]]:
@@ -151,17 +191,43 @@ class BoutiqueUser(FastHttpUser):
 
 @events.test_start.add_listener
 def announce_config(environment, **kwargs):
+    shape_file = os.getenv("OB_SHAPE_FILE", "")
+    shape_duration_s = os.getenv("OB_SHAPE_DURATION_S", "")
+    shape_spawn_rate = os.getenv("OB_SHAPE_SPAWN_RATE", "")
     print(
         json.dumps(
             {
                 "scenario_id": SCENARIO_ID,
                 "run_id": RUN_ID,
                 "shape": "schedule_file",
-                "shape_file": os.getenv("OB_SHAPE_FILE", ""),
-                "shape_duration_s": os.getenv("OB_SHAPE_DURATION_S", ""),
-                "shape_spawn_rate": os.getenv("OB_SHAPE_SPAWN_RATE", ""),
+                "shape_file": shape_file,
+                "shape_duration_s": shape_duration_s,
+                "shape_spawn_rate": shape_spawn_rate,
             },
             ensure_ascii=True,
         )
+    )
+    if not is_master_runner(environment):
+        return
+    append_injection_event(
+        "schedule_started",
+        shape_file=shape_file,
+        shape_duration_s=shape_duration_s,
+        shape_spawn_rate=shape_spawn_rate,
+    )
+    update_run_manifest(
+        status="running",
+        inject_start_utc=now_utc(),
+    )
+
+
+@events.test_stop.add_listener
+def record_test_stop(environment, **kwargs):
+    if not is_master_runner(environment):
+        return
+    append_injection_event("schedule_finished")
+    update_run_manifest(
+        status="finished",
+        inject_end_utc=now_utc(),
     )
 
