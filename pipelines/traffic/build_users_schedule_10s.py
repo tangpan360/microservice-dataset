@@ -61,17 +61,16 @@ def build_one(
     out_csv: Path,
     meta_out: Path | None,
     step_s: int,
-    p99_users: int,
-    anchor_quantile: float,
+    peak_users: int,
 ) -> dict:
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     if meta_out is not None:
         meta_out.parent.mkdir(parents=True, exist_ok=True)
 
     step_counts, minute_avg_rps_sorted = load_counts(input_csv, step_s=step_s)
-    anchor = percentile(minute_avg_rps_sorted, anchor_quantile)
-    if anchor <= 0:
-        raise ValueError(f"Non-positive anchor rps: {anchor}")
+    peak_rps = max((count / float(step_s) for count in step_counts.values()), default=0.0)
+    if peak_rps <= 0:
+        raise ValueError(f"Non-positive peak rps: {peak_rps}")
 
     max_step = max(step_counts.keys()) if step_counts else 0
     with out_csv.open("w", newline="", encoding="utf-8") as f:
@@ -80,21 +79,15 @@ def build_one(
         for t_s in range(0, max_step + 1, step_s):
             req_count = step_counts.get(t_s, 0)
             rps = req_count / float(step_s)
-            users = int(round(p99_users * (rps / anchor)))
-            if users < 0:
-                users = 0
+            users = max(0, int(round(peak_users * (rps / peak_rps))))
             w.writerow([t_s, users, req_count, f"{rps:.6f}"])
 
     meta = {
         "input": str(input_csv),
         "out": str(out_csv),
         "step_s": step_s,
-        "p99_users": p99_users,
-        "anchor": {
-            "type": "p99_1m_avg_rps",
-            "quantile": anchor_quantile,
-            "value": anchor,
-        },
+        "peak_users": peak_users,
+        "peak_rps": peak_rps,
     }
 
     if meta_out is not None:
@@ -123,14 +116,11 @@ def main() -> int:
     )
     p.add_argument("--step-s", type=int, default=10, help="Step seconds for schedule (default: 10).")
     p.add_argument(
-        "--p99-users",
+        "--peak-users",
         type=int,
         default=2000,
-        help="Users when traffic reaches the P99_1m anchor (default: 2000).",
+        help="Target users at the maximum 10s RPS point (default: 2000).",
     )
-    # Backward-compat alias (deprecated): cap used to be both anchor users and an upper bound.
-    p.add_argument("--cap", type=int, dest="p99_users", help=argparse.SUPPRESS)
-    p.add_argument("--anchor-quantile", type=float, default=0.99, help="Anchor quantile on 1m avg RPS.")
     p.add_argument(
         "--out-dir",
         default="",
@@ -145,8 +135,7 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     step_s = int(args.step_s)
-    p99_users = int(args.p99_users)
-    anchor_quantile = float(args.anchor_quantile)
+    peak_users = int(args.peak_users)
 
     out_dir = Path(args.out_dir) if args.out_dir else None
     meta_enabled = not bool(args.no_meta)
@@ -156,17 +145,17 @@ def main() -> int:
             "input": repo_root
             / "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv",
             "schedule": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
-            / f"clarknet_users_10s_p99_1m_u{p99_users}.csv",
+            / f"clarknet_users_10s_peak_u{peak_users}.csv",
             "meta": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
-            / f"clarknet_meta_p99_1m_u{p99_users}.json",
+            / f"clarknet_meta_peak_u{peak_users}.json",
         },
         "nasa": {
             "input": repo_root
             / "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv",
             "schedule": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))
-            / f"nasa_users_10s_p99_1m_u{p99_users}.csv",
+            / f"nasa_users_10s_peak_u{peak_users}.csv",
             "meta": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))
-            / f"nasa_meta_p99_1m_u{p99_users}.json",
+            / f"nasa_meta_peak_u{peak_users}.json",
         },
     }
 
@@ -183,17 +172,14 @@ def main() -> int:
             out_csv=out_csv,
             meta_out=meta_out,
             step_s=step_s,
-            p99_users=p99_users,
-            anchor_quantile=anchor_quantile,
+            peak_users=peak_users,
         )
 
         print(f"[{name}] input : {input_csv}")
         print(f"[{name}] output: {out_csv}")
         if meta_out is not None:
             print(f"[{name}] meta  : {meta_out}")
-        print(
-            f"[{name}] anchor: {meta['anchor']['type']} q={meta['anchor']['quantile']} value={meta['anchor']['value']:.6f}"
-        )
+        print(f"[{name}] peak  : rps={meta['peak_rps']:.6f} -> users={meta['peak_users']}")
         print(f"[{name}] next  : bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh \"{out_csv}\" 16 30m --web-port 0")
         print()
 
