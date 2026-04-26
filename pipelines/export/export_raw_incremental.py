@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+from service_urls import resolve_jaeger_url, resolve_prom_url
 from time_range import to_rfc3339_utc
 
 
@@ -135,11 +136,12 @@ def run_prom(
     out_dir = out_base_dir / "prom" / date_dir / window_name(start_s, end_s)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    prom_url = resolve_prom_url(config.get("url"))
     command = [
         sys.executable,
         str(script_path),
         "--prom",
-        str(config["url"]),
+        prom_url,
         "--namespace",
         str(config["namespace"]),
         "--window",
@@ -156,7 +158,7 @@ def run_prom(
         str(out_dir),
     ]
     append_metadata_args(command, config.get("metadata", {}))
-    print(f"prom: exporting {to_rfc3339_utc(start_s)} -> {to_rfc3339_utc(end_s)}")
+    print(f"prom: exporting {to_rfc3339_utc(start_s)} -> {to_rfc3339_utc(end_s)} via {prom_url}")
     run_command(command, dry_run=dry_run)
     if not dry_run:
         save_state(state_path, end_s)
@@ -204,7 +206,8 @@ def run_jaeger(
         return
 
     start_s, end_s = window
-    print(f"jaeger: exporting {to_rfc3339_utc(start_s)} -> {to_rfc3339_utc(end_s)}")
+    jaeger_url = resolve_jaeger_url(config.get("url"))
+    print(f"jaeger: exporting {to_rfc3339_utc(start_s)} -> {to_rfc3339_utc(end_s)} via {jaeger_url}")
 
     service = str(config["service"])
     for slice_start_s, slice_end_s in iter_slices(start_s, end_s, slice_s):
@@ -215,7 +218,7 @@ def run_jaeger(
             sys.executable,
             str(script_path),
             "--jaeger",
-            str(config["url"]),
+            jaeger_url,
             "--service",
             service,
             "--start",

@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from service_urls import default_jaeger_url
 from time_range import resolve_time_range, to_rfc3339_utc
 
 DEFAULT_TRACE_LIMIT = 10_000
@@ -50,7 +51,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Export Jaeger traces as raw JSON."
     )
-    parser.add_argument("--jaeger", default="http://127.0.0.1:16686", help="Jaeger query base URL.")
+    parser.add_argument(
+        "--jaeger",
+        default=default_jaeger_url(),
+        help="Jaeger query base URL. Default: http://127.0.0.1:16686.",
+    )
     parser.add_argument(
         "--service",
         default="frontend.ob",

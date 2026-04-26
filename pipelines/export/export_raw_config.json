@@ -1,7 +1,7 @@
 {
   "prom": {
     "enabled": true,
-    "url": "http://127.0.0.1:19090",
+    "url": "",
     "namespace": "ob",
     "metadata": {
       "run_id": "",
@@ -17,7 +17,7 @@
   },
   "jaeger": {
     "enabled": true,
-    "url": "http://127.0.0.1:16686",
+    "url": "",
     "service": "frontend.ob",
     "metadata": {
       "run_id": "",

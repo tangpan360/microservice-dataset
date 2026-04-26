@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from service_urls import default_prom_url
 from time_range import resolve_time_range, to_rfc3339_utc
 
 
@@ -42,6 +43,51 @@ def query_range(
 
 def build_queries(ns: str, window: str) -> dict[str, str]:
     deploy_re = r"^(.*)-[a-z0-9]{8,10}-[a-z0-9]{5}$"
+    label = "destination_workload"
+
+    def zero_fill(expr: str, baseline_expr: str, on_label: str = label) -> str:
+        return f"(({expr}) or on({on_label}) (0 * ({baseline_expr})))"
+
+    def safe_div(num_expr: str, den_expr: str, on_label: str = label) -> str:
+        return f"({zero_fill(num_expr, den_expr, on_label)}) / clamp_min(({den_expr}), 1e-12)"
+
+    def safe_histogram_quantile(q: float, bucket_expr: str, baseline_expr: str, on_label: str = label) -> str:
+        raw_quantile = f"histogram_quantile({q}, {bucket_expr})"
+        return (
+            f"((({raw_quantile}) unless on({on_label}) (({baseline_expr}) == 0)) "
+            f"or on({on_label}) (0 * ({baseline_expr})))"
+        )
+
+    req_by_dest = (
+        f"sum by ({label}) ("
+        f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\"}}[{window}])"
+        f")"
+    )
+    req_5xx_by_dest = (
+        f"sum by ({label}) ("
+        f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\",response_code=~\"5..\"}}[{window}])"
+        f")"
+    )
+    req_timeout_by_dest = (
+        f"sum by ({label}) ("
+        f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\",response_flags=~\".*UT.*|.*URX.*|.*UF.*\"}}[{window}])"
+        f")"
+    )
+    latency_sum_by_dest = (
+        f"sum by ({label}) ("
+        f"rate(istio_request_duration_milliseconds_sum{{destination_workload_namespace=\"{ns}\"}}[{window}])"
+        f")"
+    )
+    latency_count_by_dest = (
+        f"sum by ({label}) ("
+        f"rate(istio_request_duration_milliseconds_count{{destination_workload_namespace=\"{ns}\"}}[{window}])"
+        f")"
+    )
+    latency_bucket_by_dest = (
+        f"sum by (le, {label}) ("
+        f"rate(istio_request_duration_milliseconds_bucket{{destination_workload_namespace=\"{ns}\"}}[{window}])"
+        f")"
+    )
 
     return {
         "service_in_rps": (
@@ -59,51 +105,11 @@ def build_queries(ns: str, window: str) -> dict[str, str]:
             f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\",response_code=~\"5..\"}}[{window}])"
             f")"
         ),
-        "service_error_rate": (
-            "("
-            f"sum by (destination_workload) ("
-            f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\",response_code=~\"5..\"}}[{window}])"
-            f")"
-            ") / ("
-            f"sum by (destination_workload) ("
-            f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f")"
-            ")"
-        ),
-        "service_timeout_rate": (
-            "("
-            f"sum by (destination_workload) ("
-            f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\",response_flags=~\".*UT.*|.*URX.*|.*UF.*\"}}[{window}])"
-            f")"
-            ") / ("
-            f"sum by (destination_workload) ("
-            f"rate(istio_requests_total{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f")"
-            ")"
-        ),
-        "service_latency_mean_ms": (
-            "("
-            f"sum by (destination_workload) ("
-            f"rate(istio_request_duration_milliseconds_sum{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f")"
-            ") / ("
-            f"sum by (destination_workload) ("
-            f"rate(istio_request_duration_milliseconds_count{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f")"
-            ")"
-        ),
-        "service_latency_p95_ms": (
-            "histogram_quantile(0.95, "
-            f"sum by (le, destination_workload) ("
-            f"rate(istio_request_duration_milliseconds_bucket{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f"))"
-        ),
-        "service_latency_p99_ms": (
-            "histogram_quantile(0.99, "
-            f"sum by (le, destination_workload) ("
-            f"rate(istio_request_duration_milliseconds_bucket{{destination_workload_namespace=\"{ns}\"}}[{window}])"
-            f"))"
-        ),
+        "service_error_rate": safe_div(req_5xx_by_dest, req_by_dest),
+        "service_timeout_rate": safe_div(req_timeout_by_dest, req_by_dest),
+        "service_latency_mean_ms": safe_div(latency_sum_by_dest, latency_count_by_dest),
+        "service_latency_p95_ms": safe_histogram_quantile(0.95, latency_bucket_by_dest, latency_count_by_dest),
+        "service_latency_p99_ms": safe_histogram_quantile(0.99, latency_bucket_by_dest, latency_count_by_dest),
         "cpu_cores": (
             "sum by (deployment) ("
             'label_replace('
@@ -162,7 +168,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Export core Online Boutique Prometheus metrics as raw JSON."
     )
-    parser.add_argument("--prom", default="http://127.0.0.1:19090", help="Prometheus base URL.")
+    parser.add_argument(
+        "--prom",
+        default=default_prom_url(),
+        help="Prometheus base URL. Default: http://127.0.0.1:19090.",
+    )
     parser.add_argument("--namespace", default="ob", help="Kubernetes namespace.")
     parser.add_argument("--window", default="1m", help="Rate window, e.g. 1m/2m/5m.")
     parser.add_argument("--minutes", type=int, default=None, help="Window length in minutes. Default: 30.")
