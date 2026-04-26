@@ -13,11 +13,13 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT = Path("dataset/processed/traffic")
-DEFAULT_OUTPUT = Path("analysis")
-DATASET_ALIASES = {
-    "clarknet": "ClarkNet-HTTP",
-    "nasa": "NASA-HTTP",
+DATASET_INPUT_FILES = {
+    "clarknet": Path(
+        "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv"
+    ),
+    "nasa": Path(
+        "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv"
+    ),
 }
 
 
@@ -28,7 +30,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data",
         dest="dataset_name",
-        help="Optional dataset name under dataset/processed/traffic, e.g. clarknet.",
+        choices=sorted(DATASET_INPUT_FILES),
+        help="Optional dataset name, e.g. clarknet or nasa.",
     )
     parser.add_argument(
         "--input",
@@ -55,20 +58,15 @@ def resolve_project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def resolve_dataset_name(name: str) -> str:
-    return DATASET_ALIASES.get(name.lower(), name)
+def resolve_input_files(args: argparse.Namespace) -> list[Path]:
+    if args.input is not None:
+        input_path = resolve_project_path(args.input)
+        return iter_input_files(input_path)
 
-
-def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     if args.dataset_name is not None:
-        dataset_dir = Path("dataset/processed/traffic") / resolve_dataset_name(args.dataset_name)
-        input_path = resolve_project_path(args.input or dataset_dir)
-        output_path = resolve_project_path(args.output or dataset_dir)
-        return input_path, output_path
+        return [resolve_project_path(DATASET_INPUT_FILES[args.dataset_name])]
 
-    input_path = resolve_project_path(args.input or DEFAULT_INPUT)
-    output_path = resolve_project_path(args.output or DEFAULT_OUTPUT)
-    return input_path, output_path
+    return [resolve_project_path(path) for path in DATASET_INPUT_FILES.values()]
 
 
 def iter_input_files(input_path: Path) -> list[Path]:
@@ -95,13 +93,13 @@ def load_daily_series(input_path: Path, max_days: int) -> tuple[list[str], list[
     return ordered_days, series
 
 
-def build_output_path(input_file: Path, output_path: Path, is_input_dir: bool) -> Path:
+def build_output_path(input_file: Path, output_path: Path | None) -> Path:
     stem = input_file.stem
     stem = stem.replace("_requests_per_second", "")
     stem = stem.replace("_requests_per_minute", "")
     filename = f"{stem}_daily_minute_curves.png"
-    if is_input_dir:
-        return output_path / filename
+    if output_path is None:
+        return input_file.parent / filename
     if output_path.suffix.lower() == ".png":
         return output_path
     return output_path / filename
@@ -148,15 +146,14 @@ def plot_daily_curves(input_path: Path, output_path: Path, max_days: int) -> Non
 
 def main() -> None:
     args = parse_args()
-    input_path, output_path = resolve_paths(args)
-    input_files = iter_input_files(input_path)
+    input_files = resolve_input_files(args)
 
     if not input_files:
-        raise FileNotFoundError(f"No processed traffic CSV files found in {input_path}")
+        raise FileNotFoundError("No processed traffic CSV files found.")
 
-    is_input_dir = input_path.is_dir()
+    output_path = resolve_project_path(args.output) if args.output is not None else None
     for input_file in input_files:
-        current_output = build_output_path(input_file, output_path, is_input_dir)
+        current_output = build_output_path(input_file, output_path)
         plot_daily_curves(input_file, current_output, args.max_days)
         print(f"input={input_file}")
         print(f"output={current_output}")
