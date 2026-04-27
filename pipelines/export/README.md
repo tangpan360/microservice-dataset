@@ -41,7 +41,7 @@ pwd
 
 ```bash
 RUN_ID="clarknet-$(date +%Y%m%d_%H%M%S)"
-SCENARIO_ID="clarknet-peak-u2000-step10s"
+SCENARIO_ID="clarknet-peak-u1000-step10s"
 RUN_DIR="dataset/processed/online_boutique_clarknet/exported/run_id=${RUN_ID}"
 
 echo "RUN_ID=$RUN_ID"
@@ -61,7 +61,7 @@ echo "RUN_DIR=$RUN_DIR"
 
 ```bash
 RUN_DIR="dataset/processed/online_boutique_clarknet/exported/run_id=<same RUN_ID as terminal 1>"
-SCHED="dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_peak_u2000.csv"
+SCHED="dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_peak_u1000.csv"
 # 把上面 echo 出来的 RUN_ID 原样填到这里
 export OB_RUN_ID="<paste RUN_ID from terminal 1>"
 # 把上面 echo 出来的 SCENARIO_ID 原样填到这里
@@ -117,7 +117,7 @@ pwd
 
 ```bash
 RUN_ID="nasa-$(date +%Y%m%d_%H%M%S)"
-SCENARIO_ID="nasa-peak-u2000-step10s"
+SCENARIO_ID="nasa-peak-u1000-step10s"
 RUN_DIR="dataset/processed/online_boutique_nasa/exported/run_id=${RUN_ID}"
 
 echo "RUN_ID=$RUN_ID"
@@ -137,7 +137,7 @@ echo "RUN_DIR=$RUN_DIR"
 
 ```bash
 RUN_DIR="dataset/processed/online_boutique_nasa/exported/run_id=<same RUN_ID as terminal 1>"
-SCHED="dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_peak_u2000.csv"
+SCHED="dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_peak_u1000.csv"
 # 把上面 echo 出来的 RUN_ID 原样填到这里
 export OB_RUN_ID="<paste RUN_ID from terminal 1>"
 # 把上面 echo 出来的 SCENARIO_ID 原样填到这里
