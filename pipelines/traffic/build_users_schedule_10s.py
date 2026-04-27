@@ -118,8 +118,8 @@ def main() -> int:
     p.add_argument(
         "--peak-users",
         type=int,
-        default=2000,
-        help="Target users at the maximum 10s RPS point (default: 2000).",
+        default=1000,
+        help="Target users at the maximum 10s RPS point (default: 1000).",
     )
     p.add_argument(
         "--out-dir",

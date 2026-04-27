@@ -136,16 +136,16 @@ python build_users_schedule_10s.py --data nasa
 
 当前默认策略是：
 
-- 直接用全局最高的 `10s avg RPS` 对齐到 `2000 users`
+- 直接用全局最高的 `10s avg RPS` 对齐到 `1000 users`
 - 其余所有时间点按比例整体缩放
-- 最终 schedule 的实际峰值就是 `2000 users`
+- 最终 schedule 的实际峰值就是 `1000 users`
 
 ### 输出
 
 默认输出到各自数据集目录下的 `schedules/`：
 
-- `dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_peak_u2000.csv`
-- `dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_peak_u2000.csv`
+- `dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_peak_u1000.csv`
+- `dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_peak_u1000.csv`
 
 默认文件名里的 `peak` 表示它是按全局最高 `10s avg RPS` 对齐生成的。
 
