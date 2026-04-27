@@ -14,7 +14,16 @@ TIMESTAMP_RE = re.compile(r"\[(\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{
 TIMESTAMP_FMT = "%d/%b/%Y:%H:%M:%S %z"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = Path("dataset/raw/ClarkNet-HTTP")
-DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv")
+DEFAULT_OUTPUT = Path("dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_weekdays_requests_per_second.csv")
+
+
+def parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "y"}:
+        return True
+    if normalized in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean value: {value!r}; expected true/false")
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,6 +41,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT,
         help="Path to an output CSV file or directory, relative to the project root by default.",
+    )
+    parser.add_argument(
+        "--include-weekends",
+        type=parse_bool,
+        default=False,
+        metavar="BOOL",
+        help="Whether to include Saturday/Sunday data (true/false). Default: false.",
     )
     return parser.parse_args()
 
@@ -57,7 +73,11 @@ def iter_input_files(input_path: Path) -> list[Path]:
     )
 
 
-def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
+def include_timestamp(ts: datetime, *, include_weekends: bool) -> bool:
+    return include_weekends or ts.weekday() < 5
+
+
+def extract_counts(input_path: Path, *, include_weekends: bool) -> tuple[Counter, datetime, datetime, int]:
     counts: Counter = Counter()
     min_ts: datetime | None = None
     max_ts: datetime | None = None
@@ -74,6 +94,9 @@ def extract_counts(input_path: Path) -> tuple[Counter, datetime, datetime, int]:
                 ts = datetime.strptime(match.group(1), TIMESTAMP_FMT)
             except ValueError:
                 skipped_lines += 1
+                continue
+
+            if not include_timestamp(ts, include_weekends=include_weekends):
                 continue
 
             second_ts = ts.replace(microsecond=0)
@@ -113,17 +136,28 @@ def merge_results(
     return merged_counts, min_ts, max_ts, skipped_lines
 
 
-def write_series(output_path: Path, counts: Counter, min_ts: datetime, max_ts: datetime) -> None:
+def write_series(
+    output_path: Path,
+    counts: Counter,
+    min_ts: datetime,
+    max_ts: datetime,
+    *,
+    include_weekends: bool,
+) -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     current = min_ts
+    rows_written = 0
     with output_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "request_count"])
 
         while current <= max_ts:
-            writer.writerow([current.isoformat(), counts.get(current, 0)])
+            if include_timestamp(current, include_weekends=include_weekends):
+                writer.writerow([current.isoformat(), counts.get(current, 0)])
+                rows_written += 1
             current += timedelta(seconds=1)
+    return rows_written
 
 
 def main() -> None:
@@ -138,16 +172,18 @@ def main() -> None:
     if output_path.suffix.lower() != ".csv":
         raise ValueError("output must be a .csv file path")
 
-    results = [extract_counts(input_file) for input_file in input_files]
+    results = [extract_counts(input_file, include_weekends=args.include_weekends) for input_file in input_files]
     counts, min_ts, max_ts, skipped_lines = merge_results(results)
-    write_series(output_path, counts, min_ts, max_ts)
+    rows_written = write_series(output_path, counts, min_ts, max_ts, include_weekends=args.include_weekends)
 
     span_seconds = int((max_ts - min_ts).total_seconds()) + 1
     print(f"input={input_path}")
     print(f"output={output_path}")
+    print(f"include_weekends={args.include_weekends}")
     print(f"start={min_ts.isoformat()}")
     print(f"end={max_ts.isoformat()}")
-    print(f"seconds={span_seconds}")
+    print(f"span_seconds={span_seconds}")
+    print(f"written_seconds={rows_written}")
     print(f"nonzero_seconds={len(counts)}")
     print(f"skipped_lines={skipped_lines}")
 

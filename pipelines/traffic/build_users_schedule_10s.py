@@ -3,7 +3,6 @@
 import argparse
 import csv
 import json
-from datetime import datetime
 from pathlib import Path
 
 
@@ -31,24 +30,23 @@ def load_counts(input_csv: Path, *, step_s: int) -> tuple[dict[int, int], list[f
     if step_s <= 0:
         raise ValueError("step_s must be positive")
 
-    start_ts: datetime | None = None
     step_counts: dict[int, int] = {}
     minute_counts: dict[int, int] = {}
+    logical_second = 0
 
     with input_csv.open("r", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
-            ts = datetime.fromisoformat(row["timestamp"])
             count = int(row["request_count"])
-            if start_ts is None:
-                start_ts = ts
-            elapsed = int((ts - start_ts).total_seconds())
-            step_bucket = (elapsed // step_s) * step_s
-            minute_bucket = (elapsed // 60) * 60
+            # Treat the extracted CSV as a dense logical time series so skipped weekends
+            # do not create two-day zero gaps inside the generated Locust schedule.
+            step_bucket = (logical_second // step_s) * step_s
+            minute_bucket = (logical_second // 60) * 60
             step_counts[step_bucket] = step_counts.get(step_bucket, 0) + count
             minute_counts[minute_bucket] = minute_counts.get(minute_bucket, 0) + count
+            logical_second += 1
 
-    if start_ts is None:
+    if logical_second == 0:
         raise ValueError(f"No rows in {input_csv}")
 
     minute_avg_rps_sorted = sorted([v / 60.0 for v in minute_counts.values()])
@@ -143,7 +141,7 @@ def main() -> int:
     datasets = {
         "clarknet": {
             "input": repo_root
-            / "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv",
+            / "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_weekdays_requests_per_second.csv",
             "schedule": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
             / f"clarknet_users_10s_peak_u{peak_users}.csv",
             "meta": (out_dir or default_schedule_dir(repo_root, "ClarkNet-HTTP"))
@@ -151,7 +149,7 @@ def main() -> int:
         },
         "nasa": {
             "input": repo_root
-            / "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv",
+            / "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_weekdays_requests_per_second.csv",
             "schedule": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))
             / f"nasa_users_10s_peak_u{peak_users}.csv",
             "meta": (out_dir or default_schedule_dir(repo_root, "NASA-HTTP"))

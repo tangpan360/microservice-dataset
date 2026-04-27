@@ -15,10 +15,10 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATASET_INPUT_FILES = {
     "clarknet": Path(
-        "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv"
+        "dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_weekdays_requests_per_second.csv"
     ),
     "nasa": Path(
-        "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv"
+        "dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_weekdays_requests_per_second.csv"
     ),
 }
 

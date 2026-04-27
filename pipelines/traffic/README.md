@@ -27,7 +27,7 @@ gunzip NASA_access_log_Aug95.gz
 
 ### 提取
 
-默认提取 `NASA_access_log_Aug95` 中 `1995-08-07` 到 `1995-08-20` 这 `14` 天的秒级数据：
+默认提取 `NASA_access_log_Aug95` 中 `1995-08-07` 到 `1995-08-20` 这段时间内的**工作日**秒级数据，默认会跳过周末，因此最终是 `10` 天：
 
 ```bash
 cd pipelines/traffic
@@ -36,7 +36,13 @@ python extract_nasa_requests.py
 
 默认输出文件：
 
-- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv`
+- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_weekdays_requests_per_second.csv`
+
+如果你想保留周末，可以显式加：
+
+```bash
+python extract_nasa_requests.py --include-weekends true
+```
 
 ### 可视化
 
@@ -82,7 +88,7 @@ gunzip clarknet_access_log_Sep4.gz
 
 ### 提取
 
-默认提取整个目录并合并成一个两周的秒级 CSV：
+默认提取整个目录并合并成一个**仅工作日**的秒级 CSV，默认会跳过周末，因此两周数据会压缩成 `10` 个工作日：
 
 ```bash
 cd pipelines/traffic
@@ -91,7 +97,13 @@ python extract_clarknet_requests.py
 
 默认输出文件：
 
-- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv`
+- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_weekdays_requests_per_second.csv`
+
+如果你想保留周末，可以显式加：
+
+```bash
+python extract_clarknet_requests.py --include-weekends true
+```
 
 ### 可视化
 
@@ -118,8 +130,8 @@ python plot_daily_minute_curves.py --data clarknet
 
 前置条件：你已经跑完上面的提取步骤，得到两份秒级 CSV：
 
-- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_requests_per_second.csv`
-- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_requests_per_second.csv`
+- `dataset/processed/traffic/ClarkNet-HTTP/clarknet_access_log_aug28_sep10_weekdays_requests_per_second.csv`
+- `dataset/processed/traffic/NASA-HTTP/NASA_access_log_Aug95_19950807_19950820_weekdays_requests_per_second.csv`
 
 生成 schedule：
 
@@ -138,6 +150,7 @@ python build_users_schedule_10s.py --data nasa
 
 - 直接用全局最高的 `10s avg RPS` 对齐到 `1000 users`
 - 其余所有时间点按比例整体缩放
+- 如果上游 CSV 跳过了周末，这里会自动压缩掉周末缺口，不会在 schedule 中插入两天全 0
 - 最终 schedule 的实际峰值就是 `1000 users`
 
 ### 输出
