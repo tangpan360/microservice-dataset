@@ -150,7 +150,6 @@ python build_users_schedule_10s.py --data nasa
 
 - 直接用全局最高的 `10s avg RPS` 对齐到 `1000 users`
 - 其余所有时间点按比例整体缩放
-- 如果上游 CSV 跳过了周末，这里会自动压缩掉周末缺口，不会在 schedule 中插入两天全 0
 - 最终 schedule 的实际峰值就是 `1000 users`
 
 ### 输出
