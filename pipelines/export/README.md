@@ -57,6 +57,14 @@ echo "RUN_DIR=$RUN_DIR"
 - `run_manifest.json`：这次实验的摘要信息
 - `injection_events.jsonl`：注入开始/结束等事件时间日志
 
+当前仓库默认生成的 ClarkNet schedule 是：
+
+- `dataset/processed/traffic/ClarkNet-HTTP/schedules/clarknet_users_10s_peak_u1000.csv`
+
+它对应的是 **weekday-only 压缩后的 `10` 天** 逻辑流量，因此这里的运行时长应当使用：
+
+- `10d`
+
 然后在同一个终端的 `microservice-dataset` 仓库根目录运行：
 
 ```bash
@@ -68,7 +76,7 @@ export OB_RUN_ID="<paste RUN_ID from terminal 1>"
 export OB_SCENARIO_ID="<paste SCENARIO_ID from terminal 1>"
 export OB_RUN_ARTIFACT_DIR="$RUN_DIR"
 
-bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 14d --web-port 0
+bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 10d --web-port 0
 ```
 
 注入结束后，这一步会在 `RUN_DIR` 下补充：
@@ -133,6 +141,14 @@ echo "RUN_DIR=$RUN_DIR"
 - `run_manifest.json`：这次实验的摘要信息
 - `injection_events.jsonl`：注入开始/结束等事件时间日志
 
+当前仓库默认生成的 NASA schedule 是：
+
+- `dataset/processed/traffic/NASA-HTTP/schedules/nasa_users_10s_peak_u1000.csv`
+
+它对应的是 **weekday-only 压缩后的 `10` 天** 逻辑流量，因此这里的运行时长应当使用：
+
+- `10d`
+
 然后在同一个终端的 `microservice-dataset` 仓库根目录运行：
 
 ```bash
@@ -144,7 +160,7 @@ export OB_RUN_ID="<paste RUN_ID from terminal 1>"
 export OB_SCENARIO_ID="<paste SCENARIO_ID from terminal 1>"
 export OB_RUN_ARTIFACT_DIR="$RUN_DIR"
 
-bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 14d --web-port 0
+bash benchmarks/online_boutique/loadgen-locust/run_traffic_schedule_10s.sh "$SCHED" 16 10d --web-port 0
 ```
 
 这一步会在 `RUN_DIR` 下补充：
