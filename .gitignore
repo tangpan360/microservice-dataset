@@ -47,3 +47,5 @@ dataset/processed/
 paper/
 tools/
 # docs/
+
+dataset/raw/clusterdata/cluster-trace-microservices-v2022/data/
