@@ -338,6 +338,33 @@ def filter_by_effective_bounds(
     return df.loc[mask].reset_index(drop=True)
 
 
+def deduplicate_service_df(service_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    if service_df.empty:
+        return service_df, 0
+    before = len(service_df)
+    service_df = (
+        service_df.sort_values(["timestamp_bucket_s", "service", "day"])
+        .drop_duplicates(subset=["timestamp_bucket_utc", "service"], keep="first")
+        .reset_index(drop=True)
+    )
+    return service_df, before - len(service_df)
+
+
+def deduplicate_edge_df(edge_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    if edge_df.empty:
+        return edge_df, 0
+    before = len(edge_df)
+    edge_df = (
+        edge_df.sort_values(["timestamp_bucket_s", "caller_service", "callee_service", "day"])
+        .drop_duplicates(
+            subset=["timestamp_bucket_utc", "caller_service", "callee_service"],
+            keep="first",
+        )
+        .reset_index(drop=True)
+    )
+    return edge_df, before - len(edge_df)
+
+
 def build_service_metadata(service_df: pd.DataFrame, service_idx_map: dict[str, int]) -> pd.DataFrame:
     if service_df.empty:
         return pd.DataFrame(columns=["service", "service_idx", "first_seen_timestamp_bucket_s", "last_seen_timestamp_bucket_s", "total_active_minutes"])
@@ -363,6 +390,29 @@ def write_csv(df: pd.DataFrame, out_path: Path) -> None:
 
 def write_table(df: pd.DataFrame, base_path: Path) -> None:
     write_csv(df, base_path.with_suffix(".csv"))
+
+
+def build_ready_summary(
+    *,
+    run_id: str,
+    scenario_id: str,
+    service_df: pd.DataFrame,
+    edge_df: pd.DataFrame,
+    service_duplicates_removed: int,
+    edge_duplicates_removed: int,
+) -> dict:
+    return {
+        "run_id": run_id,
+        "scenario_id": scenario_id,
+        "service_rows": int(len(service_df)),
+        "edge_rows": int(len(edge_df)),
+        "service_duplicates_removed": int(service_duplicates_removed),
+        "edge_duplicates_removed": int(edge_duplicates_removed),
+        "service_count": int(service_df["service"].nunique()) if not service_df.empty else 0,
+        "minute_count": int(service_df["timestamp_bucket_utc"].nunique()) if not service_df.empty else 0,
+        "start_time_utc": "" if service_df.empty else str(service_df["timestamp_bucket_utc"].min()),
+        "end_time_utc": "" if service_df.empty else str(service_df["timestamp_bucket_utc"].max()),
+    }
 
 
 def main() -> int:
@@ -405,7 +455,6 @@ def main() -> int:
         raise SystemExit(f"No canonical prom day directories found under: {prom_root}")
 
     day_results: list[tuple[str, pd.DataFrame, pd.DataFrame]] = []
-    all_run_metadata = []
 
     for day_dir in day_dirs:
         day = day_dir.name
@@ -484,54 +533,72 @@ def main() -> int:
         edge_df["scenario_id"] = scenario_id
         edge_df["day"] = day
         day_results.append((day, service_df, edge_df))
-        all_run_metadata.append(
-            build_run_metadata(
-                day=day,
-                run_id=run_id,
-                scenario_id=scenario_id,
-                service_df=service_df,
-            )
-        )
 
     combined_service_df = (
         pd.concat([service_df for _, service_df, _ in day_results], ignore_index=True)
         if day_results
         else pd.DataFrame()
     )
+    combined_edge_df = (
+        pd.concat([edge_df for _, _, edge_df in day_results], ignore_index=True)
+        if day_results
+        else pd.DataFrame()
+    )
+
+    combined_service_df, service_duplicates_removed = deduplicate_service_df(combined_service_df)
+    combined_edge_df, edge_duplicates_removed = deduplicate_edge_df(combined_edge_df)
+
     service_order = sorted(combined_service_df["service"].unique()) if not combined_service_df.empty else []
     service_idx_map = {service: idx for idx, service in enumerate(service_order)}
 
-    for day, service_df, edge_df in day_results:
-        service_df["service_idx"] = service_df["service"].map(service_idx_map).astype(int)
-        if not edge_df.empty:
-            edge_df["caller_idx"] = edge_df["caller_service"].map(service_idx_map).fillna(-1).astype(int)
-            edge_df["callee_idx"] = edge_df["callee_service"].map(service_idx_map).fillna(-1).astype(int)
+    if not combined_service_df.empty:
+        combined_service_df["service_idx"] = combined_service_df["service"].map(service_idx_map).astype(int)
+        combined_service_df = combined_service_df.sort_values(
+            ["timestamp_bucket_s", "service"]
+        ).reset_index(drop=True)
 
-        write_table(
-            service_df,
-            out_root / "service_minute_features" / f"day={day}" / "part-000",
+    if not combined_edge_df.empty:
+        combined_edge_df["caller_idx"] = (
+            combined_edge_df["caller_service"].map(service_idx_map).fillna(-1).astype(int)
         )
-        write_table(
-            edge_df,
-            out_root / "service_call_edge_minute" / f"day={day}" / "part-000",
+        combined_edge_df["callee_idx"] = (
+            combined_edge_df["callee_service"].map(service_idx_map).fillna(-1).astype(int)
         )
-        print(f"built tables day {day}")
+        combined_edge_df = combined_edge_df.sort_values(
+            ["timestamp_bucket_s", "caller_service", "callee_service"]
+        ).reset_index(drop=True)
 
-    combined_service_df = (
-        pd.concat([service_df for _, service_df, _ in day_results], ignore_index=True)
-        if day_results
-        else pd.DataFrame()
-    )
     service_metadata_df = build_service_metadata(combined_service_df, service_idx_map)
-    run_metadata_df = pd.concat(all_run_metadata, ignore_index=True) if all_run_metadata else pd.DataFrame()
-
-    write_table(
-        service_metadata_df,
-        out_root / "service_metadata" / "service_metadata",
+    run_metadata_rows = []
+    if not combined_service_df.empty:
+        for day, group in combined_service_df.groupby("day", sort=True):
+            run_metadata_rows.append(
+                build_run_metadata(
+                    day=day,
+                    run_id=run_id,
+                    scenario_id=scenario_id,
+                    service_df=group.reset_index(drop=True),
+                )
+            )
+    run_metadata_df = (
+        pd.concat(run_metadata_rows, ignore_index=True) if run_metadata_rows else pd.DataFrame()
     )
-    write_table(
-        run_metadata_df,
-        out_root / "run_metadata" / "run_metadata",
+    ready_summary = build_ready_summary(
+        run_id=run_id,
+        scenario_id=scenario_id,
+        service_df=combined_service_df,
+        edge_df=combined_edge_df,
+        service_duplicates_removed=service_duplicates_removed,
+        edge_duplicates_removed=edge_duplicates_removed,
+    )
+
+    write_csv(combined_service_df, out_root / "service_minute_features.csv")
+    write_csv(combined_edge_df, out_root / "service_call_edge_minute.csv")
+    write_csv(service_metadata_df, out_root / "service_metadata.csv")
+    write_csv(run_metadata_df, out_root / "run_metadata.csv")
+    (out_root / "ready_summary.json").write_text(
+        json.dumps(ready_summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
     return 0
 
