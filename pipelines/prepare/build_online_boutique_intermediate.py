@@ -44,6 +44,11 @@ def minute_bucket_s(timestamp_s: int | float) -> int:
     return int(float(timestamp_s) // 60 * 60)
 
 
+def ceil_utc_to_minute_bucket_s(value: str) -> int:
+    ts = pd.to_datetime(value, utc=True)
+    return int(ts.ceil("min").timestamp())
+
+
 def normalize_service_name(name: str) -> str:
     if not name:
         return ""
@@ -297,6 +302,42 @@ def resolve_scenario_id(dataset_root: Path, run_id: str, scenario_id_override: s
     return str(load_json(manifest_path).get("scenario_id", "")).strip()
 
 
+def resolve_effective_bounds(dataset_root: Path, run_id: str) -> tuple[int, int]:
+    manifest_path = dataset_root / "exported" / f"run_id={run_id}" / "run_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"run_manifest.json not found: {manifest_path}")
+
+    manifest = load_json(manifest_path)
+    inject_start_utc = str(manifest.get("inject_start_utc", "")).strip()
+    inject_end_utc = str(manifest.get("inject_end_utc", "")).strip()
+    if not inject_start_utc or not inject_end_utc:
+        raise ValueError(
+            f"run_manifest.json missing inject_start_utc or inject_end_utc: {manifest_path}"
+        )
+
+    # Drop the first and last effective minute buckets as requested:
+    # start one minute later, end one minute earlier.
+    start_bucket_s = ceil_utc_to_minute_bucket_s(inject_start_utc) + 60
+    end_bucket_s = ceil_utc_to_minute_bucket_s(inject_end_utc) - 60
+    if end_bucket_s < start_bucket_s:
+        raise ValueError(
+            f"Resolved invalid effective bounds: start={inject_start_utc}, end={inject_end_utc}"
+        )
+    return start_bucket_s, end_bucket_s
+
+
+def filter_by_effective_bounds(
+    df: pd.DataFrame,
+    *,
+    start_bucket_s: int,
+    end_bucket_s: int,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    mask = (df["timestamp_bucket_s"] >= start_bucket_s) & (df["timestamp_bucket_s"] <= end_bucket_s)
+    return df.loc[mask].reset_index(drop=True)
+
+
 def build_service_metadata(service_df: pd.DataFrame, service_idx_map: dict[str, int]) -> pd.DataFrame:
     if service_df.empty:
         return pd.DataFrame(columns=["service", "service_idx", "first_seen_timestamp_bucket_s", "last_seen_timestamp_bucket_s", "total_active_minutes"])
@@ -355,6 +396,7 @@ def main() -> int:
     excluded_services = {item.strip() for item in args.exclude_services.split(",") if item.strip()}
     excluded_services.update(DEFAULT_EXCLUDED_SERVICES)
     scenario_id = resolve_scenario_id(dataset_root, run_id, args.scenario_id)
+    effective_start_bucket_s, effective_end_bucket_s = resolve_effective_bounds(dataset_root, run_id)
 
     out_root.mkdir(parents=True, exist_ok=True)
 
@@ -418,6 +460,19 @@ def main() -> int:
             edge_df = edge_df.sort_values(
                 ["timestamp_bucket_s", "caller_service", "callee_service"]
             ).reset_index(drop=True)
+
+        service_df = filter_by_effective_bounds(
+            service_df,
+            start_bucket_s=effective_start_bucket_s,
+            end_bucket_s=effective_end_bucket_s,
+        )
+        edge_df = filter_by_effective_bounds(
+            edge_df,
+            start_bucket_s=effective_start_bucket_s,
+            end_bucket_s=effective_end_bucket_s,
+        )
+        if service_df.empty:
+            continue
 
         service_df = attach_dependency_features(service_df, edge_df)
         service_df["run_id"] = run_id
